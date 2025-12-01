@@ -1,0 +1,96 @@
+name: Security Scanning
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+jobs:
+  secret-scan:
+    name: Detect Secrets
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for comprehensive scanning
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install detect-secrets
+        run: |
+          pip install detect-secrets
+
+      - name: Run detect-secrets scan
+        run: |
+          detect-secrets scan \
+            --exclude-files 'configs/.*\.json' \
+            --exclude-files '\.md$' \
+            --exclude-files 'package-lock\.json' \
+            --exclude-files '\.lock$' \
+            --baseline .secrets.baseline
+
+      - name: Check for secrets in git history (last 100 commits)
+        run: |
+          # Scan recent git history for accidentally committed secrets
+          git log --all --pretty=format: -p -100 | \
+          detect-secrets scan --stdin \
+            --exclude-files 'configs/.*\.json' \
+            --exclude-files '\.md$' || true
+
+      - name: Security scan summary
+        if: always()
+        run: |
+          echo "✅ Secret scanning complete"
+          echo "If secrets were detected, the job will fail above"
+          echo "To update baseline: detect-secrets scan --baseline .secrets.baseline"
+
+  prompt-injection-check:
+    name: Prompt Injection Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run prompt injection detection
+        run: |
+          echo "Scanning for prompt injection patterns..."
+
+          # Run our custom prompt injection scanner for FPD
+          if uv run python .security/check_prompt_injections.py src/ tests/ *.md *.yml *.yaml *.json; then
+            echo "✅ No prompt injection patterns detected"
+          else
+            echo "❌ Prompt injection patterns found!"
+            echo ""
+            echo "These patterns may indicate attempts to:"
+            echo "- Override system instructions (ignore previous instructions)"
+            echo "- Extract sensitive prompts (show me your instructions)"
+            echo "- Change AI behavior (you are now a different AI)"
+            echo "- Bypass security controls (admin mode on)"
+            echo "- Extract petition data (dump all petitions)"
+            echo "- Manipulate CFR rules (bypass 37 CFR requirements)"
+            echo "- Social engineering (we became friends)"
+            echo ""
+            echo "Please review the flagged content to ensure it is not malicious."
+            echo "If these are legitimate test cases or documentation examples,"
+            echo "consider moving them to a dedicated test file or adding"
+            echo "appropriate context markers."
+            exit 1
+          fi

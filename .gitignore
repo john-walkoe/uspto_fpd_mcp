@@ -1,0 +1,75 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+.env
+
+# IDE
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Environment variables - NEVER commit secrets!
+.env
+.env.local
+.env.*.local
+*.env
+.env.*
+
+# Claude assistant reference file with API keys
+CLAUDE.md
+
+# Logs
+*.log
+logs/
+
+# OS
+Thumbs.db
+
+# uv lock file
+uv.lock
+
+# Project specific files to exclude (per user request)
+tests/archive/
+
+# Claude assistant documents
+Claude_Documents/
