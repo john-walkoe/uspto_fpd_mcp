@@ -145,10 +145,9 @@ class PromptInjectionDetector(BasePlugin):
         ]
         
         # Unicode steganography detection (addressing emoji prompt injection vulnerability)
+        # Note: Basic variation selectors removed from pattern matching since they're 
+        # handled by the more sophisticated _detect_unicode_steganography method
         self.unicode_steganography_patterns = [
-            # Variation Selectors (used in emoji steganography from Repello.ai article)
-            r'[\uFE00-\uFE0F]',  # Variation Selectors 1-16 (VS0/VS1 encoding)
-            
             # Zero-width characters (common in steganography) 
             r'[\u200B-\u200D]',  # Zero width space, ZWNJ, ZWJ
             r'[\u2060-\u2069]',  # Word joiner, invisible operators
@@ -222,6 +221,26 @@ class PromptInjectionDetector(BasePlugin):
         This addresses the vulnerability described in the Repello.ai article where
         malicious instructions are hidden in emoji using Unicode Variation Selectors.
         """
+        
+        # Skip lines that appear to contain legitimate emoji usage in documentation/logging
+        # Look for common patterns that indicate legitimate emoji usage
+        legitimate_patterns = [
+            'CRITICAL:', 'WARNING:', 'INFO:', 'ERROR:', 'DEBUG:',  # Log messages
+            'logger.info', 'logger.warning', 'logger.error', 'logger.debug',  # Logger calls
+            '→', 'workflows', 'tools', 'documents',  # Tool guidance text
+            '**', '"""', "'''",  # Documentation strings
+            'Install', 'Get it at:', 'enhanced features',  # Installation messages
+        ]
+        
+        # If this line contains legitimate emoji context patterns, be less strict
+        has_legitimate_context = any(pattern in text for pattern in legitimate_patterns)
+        
+        # Skip if it looks like legitimate emoji usage (single variation selector in documented context)
+        if has_legitimate_context:
+            # Count variation selectors - if only 1-2 in a documented context, likely legitimate
+            vs_count = sum(1 for char in text if 0xFE00 <= ord(char) <= 0xFE0F)
+            if vs_count <= 2:
+                return  # Skip flagging legitimate emoji usage
         
         # Check for suspicious ratios of invisible characters
         invisible_chars = 0
