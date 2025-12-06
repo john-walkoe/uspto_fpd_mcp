@@ -36,8 +36,8 @@ repos:
   - repo: local
     hooks:
       - id: prompt-injection-check
-        name: Check for prompt injection patterns
+        name: Check for prompt injection patterns (Unicode steganography & FPD attacks)
         entry: uv run python .security/check_prompt_injections.py
         language: system
-        files: \.(py|txt|md|yml|yaml|json|js|ts|html|xml|csv)$
-        exclude: \.security/.*_detector\.py$
+        files: \.(py|txt|md|yml|yaml|json|js|ts|html|xml|csv|rst|cfg|ini|toml|log|env|sh|bat|ps1)$
+        exclude: ^(\.security/.*\.py|SECURITY_.*\.md|PROMPTS\.md|README\.md|CLAUDE\.md|\.github/workflows/.*\.yml|deploy/.*|src/fpd_mcp/prompts/.*\.py)$

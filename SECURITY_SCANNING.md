@@ -1,21 +1,33 @@
 # Security Scanning - USPTO Final Petition Decisions MCP
 
-This document describes the secret scanning infrastructure for the USPTO Final Petition Decisions (FPD) MCP, designed to prevent accidental exposure of sensitive credentials.
+This document describes the comprehensive security scanning infrastructure for the USPTO Final Petition Decisions (FPD) MCP, designed to prevent accidental exposure of sensitive credentials and protect against sophisticated prompt injection attacks including Unicode steganography.
 
 ## Overview
 
-The FPD MCP uses **[detect-secrets](https://github.com/Yelp/detect-secrets)** to scan for accidentally committed secrets in the codebase. This provides **two layers of protection**:
+The FPD MCP uses **[detect-secrets](https://github.com/Yelp/detect-secrets)** and **custom prompt injection detection** to scan for accidentally committed secrets and malicious prompt patterns. This provides **three layers of protection**:
 
 1. **Pre-commit hooks** - Scans files locally before they're committed to git
-2. **GitHub Actions CI/CD** - Scans all code pushed to GitHub on every push/PR
+2. **GitHub Actions CI/CD** - Scans all code pushed to GitHub on every push/PR  
+3. **Unicode Steganography Detection** - Protects against emoji-based prompt injection attacks
+
+## 🚨 NEW: Unicode Steganography Protection
+
+Following the discovery of Unicode Variation Selector attacks (as detailed in the [Repello.ai article](https://repello.ai/blog/prompt-injection-using-emojis)), the FPD MCP now includes advanced detection for:
+
+- **Emoji-based steganography** - Malicious instructions hidden in innocent text using invisible Unicode characters
+- **Variation Selector encoding** - Binary patterns using VS0 (U+FE00) and VS1 (U+FE01) to hide messages  
+- **High invisible character ratios** - Suspicious concentrations of invisible Unicode characters
+- **Binary pattern detection** - Recognition of steganographic encoding schemes
+
+**Example Attack**: Text like "Hello!" can contain hidden malicious instructions encoded in invisible Variation Selectors that are completely undetectable to normal security scanning.
 
 ## What Gets Scanned
 
 ### 1. **Secret Detection** (20+ types)
 Uses detect-secrets to find accidentally committed credentials
 
-### 2. **Prompt Injection Detection** (70+ patterns)
-Scans for malicious prompt patterns targeting Final Petition Decisions system
+### 2. **Prompt Injection Detection** (80+ patterns)
+Scans for malicious prompt patterns targeting Final Petition Decisions system, including Unicode steganography attacks
 
 ### Secret Types Detected (20+ types)
 
@@ -63,6 +75,13 @@ The scanner detects the following types of secrets:
 - USPTO API bypass attempts ("ignore API restrictions")
 - CFR rule manipulation ("override 37 CFR requirements")
 - Petitioner information exfiltration ("dump petitioner data")
+
+**🚨 Unicode Steganography Attacks (NEW):**
+- **Variation Selector steganography** - Malicious instructions hidden using VS0/VS1 binary encoding
+- **Invisible character injection** - Zero-width spaces and other invisible Unicode characters
+- **Emoji-based hiding** - Messages concealed in emoji variation selectors
+- **Binary steganography patterns** - Systematic use of invisible characters for encoding
+- **High steganography ratios** - Suspicious concentrations of invisible vs visible characters
 
 ### Files Excluded from Scanning
 
@@ -119,21 +138,42 @@ pre-commit --version
 
 ## Usage
 
-### Prompt Injection Detection
+### Prompt Injection Detection (Including Unicode Steganography)
+
+**🚨 CRITICAL:** The scanner now detects Unicode steganography attacks as described in the [Repello.ai article](https://repello.ai/blog/prompt-injection-using-emojis).
 
 **Manual Scanning:**
 ```bash
-# Scan for prompt injection patterns
-uv run python .security/check_prompt_injections.py src/ tests/ *.md
+# Comprehensive scan for prompt injection patterns (including Unicode steganography)
+uv run python .security/check_prompt_injections.py src/ tests/ *.md *.py
 
-# Scan specific directories
+# Scan specific directories for all attack patterns
 uv run python .security/check_prompt_injections.py src/fpd_mcp/
 
-# Run via pre-commit hook
+# Include security files in scan (normally excluded)
+uv run python .security/check_prompt_injections.py --include-security-files src/ tests/
+
+# Run via pre-commit hook (automatic Unicode steganography detection)
 uv run pre-commit run prompt-injection-check --all-files
 
-# Test with verbose output
+# Verbose output (shows full attack patterns detected)
 uv run python .security/check_prompt_injections.py --verbose src/ tests/
+
+# Quiet mode (only shows summary and Unicode steganography alerts)
+uv run python .security/check_prompt_injections.py --quiet src/ tests/
+```
+
+**🔍 Unicode Steganography Examples:**
+```bash
+# Test with known steganography patterns
+echo 'Hello!' > test_file.txt
+# If test_file.txt contains hidden Variation Selectors, scanner will detect them
+
+# Check specific file for invisible characters
+uv run python .security/check_prompt_injections.py suspicious_file.md
+
+# Emergency scan when Unicode steganography is suspected
+uv run python .security/check_prompt_injections.py --verbose --include-security-files .
 ```
 
 ### Pre-commit Hooks (Local Development)
