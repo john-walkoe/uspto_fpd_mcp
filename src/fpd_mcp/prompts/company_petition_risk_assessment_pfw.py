@@ -261,7 +261,7 @@ for petition in petitions.get('results', []):
     patent_num = petition.get('patentNumber')
     if patent_num:
         try:
-            ptab_challenges = ptab_search_proceedings_minimal(patent_number=patent_num)
+            ptab_challenges = search_trials_minimal(patent_number=patent_num)
             if ptab_challenges:
                 print(f"⚠️ PTAB ALERT: Patent {{patent_num}} has challenges")
         except:

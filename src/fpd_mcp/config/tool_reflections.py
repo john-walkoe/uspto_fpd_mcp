@@ -254,7 +254,7 @@ All three USPTO MCPs support cross-referencing:
    ```
 3. **PTAB:** Check for post-grant challenges
    ```python
-   ptab_search_proceedings_minimal(patent_number='11788453')
+   search_trials_minimal(patent_number='11788453')
    ```
 4. Correlation Analysis:
    - Patents with denied examiner dispute petitions → Higher PTAB vulnerability
@@ -267,6 +267,29 @@ All three USPTO MCPs support cross-referencing:
 - High petition frequency + PTAB institution = Pattern of prosecution problems
 
 **Value:** Predict PTAB vulnerability based on prosecution petition patterns
+
+### PTAB Search Tool Parameters
+
+**All PTAB search tools support:**
+- `patent_number`: Patent number (e.g., '10701173')
+- `petitioner_name`: Party filing the challenge
+- `patent_owner_name`: Patent owner name
+- `trial_type`: 'IPR', 'PGR', 'CBM'
+- `trial_status`: Status category
+- `tech_center`: Technology center (e.g., '2600')
+- `filing_date_from/to`: Date range filters
+- `fields`: Ultra-minimal field selection (99% context reduction)
+- `limit`: Max results (default 50, max 100)
+
+**Example - Ultra-minimal PTAB query:**
+```python
+# Only 2 fields - 99% context reduction
+search_trials_minimal(
+    patent_number='10701173',
+    fields=['trialNumber', 'trialMetaData.trialStatusCategory'],
+    limit=20
+)
+```
 """
 
 
@@ -382,7 +405,7 @@ def _get_workflows_complete_section() -> str:
 
 4. **PTAB Challenge Analysis (PTAB)** - For granted patents
    ```python
-   ptab_search_proceedings_minimal(patent_number=patent_num)
+   search_trials_minimal(patent_number=patent_num)
    ```
    Assess post-grant challenge exposure
 
@@ -645,7 +668,7 @@ fpd_get_document_content(
 - Action: Full details and document access
 
 **Stage 5: Cross-MCP**
-- Tools: pfw_search_applications, ptab_search_proceedings
+- Tools: pfw_search_applications, search_trials
 - Action: Cross-reference with prosecution and PTAB
 """
 

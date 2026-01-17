@@ -193,7 +193,7 @@ for patent in portfolio_data['granted_patents'][:30]:  # Limit to 30 to prevent 
     patent_num = patent.get('patentNumber')
 
     try:
-        ptab_proceedings = ptab_search_proceedings_minimal(
+        ptab_proceedings = search_trials_minimal(
             patent_number=patent_num
         )
 
@@ -389,7 +389,7 @@ WARNING: MODERATE RED FLAGS (Monitor Closely):
 Step 4: PTAB vulnerability analysis for granted patents:
 For each granted patent:
 ```
-ptab_search_proceedings_minimal(
+search_trials_minimal(
     patent_number=patent_number
 )
 ```

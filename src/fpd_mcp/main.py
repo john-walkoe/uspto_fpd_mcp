@@ -52,7 +52,30 @@ logger = get_secure_logger(__name__)
 # Initialize settings to load API keys from secure storage
 settings = Settings()
 
-mcp = FastMCP("fpd-mcp")
+# Server instructions for Claude Code tool search (v2.1.7+)
+SERVER_INSTRUCTIONS = """
+FPD MCP provides USPTO Final Petition Decisions data through 8 tools.
+
+ALWAYS-AVAILABLE TOOLS (non-deferred, immediate access):
+1. fpd_search_petitions_minimal - Primary petition discovery
+2. fpd_get_petition_details - Get full petition details with document identifiers
+3. fpd_get_guidance - Workflow guidance and documentation
+
+PROGRESSIVE WORKFLOW:
+1. Discovery: Use fpd_search_petitions_minimal for broad search
+2. Details: Use fpd_get_petition_details to get document identifiers
+3. Analysis: Search for fpd_search_petitions_balanced for detailed analysis
+4. Documents: Search for document download/content tools (requires document_identifier from step 2)
+
+TOOL CATEGORIES TO SEARCH:
+- Search tools: "search petitions" (minimal/balanced tiers, by_art_unit, by_application)
+- Document tools: "document" (download, content extraction)
+- Guidance: "guidance" (sectioned workflow guidance)
+
+NOTE: fpd_get_petition_details is always-available because it provides document_identifier needed for download/content tools.
+"""
+
+mcp = FastMCP("fpd-mcp", instructions=SERVER_INSTRUCTIONS)
 api_client = FPDClient(api_key=settings.uspto_api_key)
 
 # Register all prompt templates AFTER mcp object is created
@@ -72,6 +95,7 @@ except Exception as e:
 # Global proxy server state
 _proxy_server_running = False
 _proxy_server_task = None
+_proxy_startup_lock = asyncio.Lock()  # Prevents concurrent proxy startup attempts
 
 
 # =============================================================================
@@ -579,7 +603,7 @@ fpd_search_petitions_balanced(
 
 **Cross-MCP Integration:**
 - applicationNumberText -> pfw_search_applications_minimal with fields parameter for targeted data
-- patentNumber -> ptab_search_proceedings_minimal(patent_number=X)
+- patentNumber -> search_trials_minimal(patent_number=X)
 - groupArtUnitNumber -> pfw_search_applications_minimal(art_unit=X, fields=[...])
 - firstApplicantName -> Match parties across PFW/PTAB MCPs"""
     try:
@@ -654,7 +678,7 @@ fpd_search_petitions_balanced(
             "workflow": "Balanced Analysis -> Cross-MCP Integration -> Document Retrieval",
             "cross_mcp_workflows": {
                 "pfw_prosecution": "pfw_search_applications_minimal with fields parameter for examiner/status context",
-                "ptab_challenges": "ptab_search_proceedings_minimal(patent_number=X) if patentNumber present",
+                "ptab_challenges": "search_trials_minimal(patent_number=X) if patentNumber present",
                 "art_unit_analysis": "fpd_search_petitions_by_art_unit(art_unit=X) for pattern analysis"
             },
             "red_flags": {
@@ -860,7 +884,7 @@ async def fpd_search_petitions_by_application(
                 "step_1": f"Use pfw_search_applications_minimal(query='applicationNumberText:{clean_app_num}', fields=[...]) for prosecution context",
                 "step_2": "Compare petition dates with office action dates, RCE filings, examiner changes",
                 "step_3": "Identify prosecution events that triggered petitions",
-                "step_4": "If patented, use ptab_search_proceedings_minimal to check PTAB challenges"
+                "step_4": "If patented, use search_trials_minimal to check PTAB challenges"
             },
             "petition_pattern_analysis": {
                 "revival_only": "Application was abandoned and revived - check PFW for abandonment reason",
@@ -1511,27 +1535,72 @@ Context Efficiency Benefits:
 # =============================================================================
 
 async def _ensure_proxy_server_running(port: int = 8081):
-    """Ensure the proxy server is running (auto-start on first download)"""
+    """
+    Ensure the proxy server is running (auto-start on first download).
+
+    This function is called when:
+    - ENABLE_ALWAYS_ON_PROXY=false (on-demand mode)
+    - Centralized proxy is unavailable
+    - A document download is requested
+
+    Thread-safe: Uses asyncio.Lock to prevent concurrent startup attempts.
+
+    Args:
+        port: Port number for proxy server (default: 8081)
+
+    Returns:
+        True if proxy is running (already running or successfully started)
+    """
     global _proxy_server_running, _proxy_server_task
 
-    if not _proxy_server_running:
-        logger.info(f"Starting HTTP proxy server on port {port}")
+    # Fast path: already running (avoids lock acquisition overhead)
+    if _proxy_server_running:
+        return True
 
-        # Wrap background task with exception handler
-        async def safe_proxy_runner():
+    # Use lock to prevent concurrent startup attempts
+    async with _proxy_startup_lock:
+        # Double-check after acquiring lock (another task may have started it)
+        if _proxy_server_running:
+            return True
+
+        try:
+            logger.info(f"📦 On-demand proxy startup: Starting local proxy on port {port}")
+
+            # Wrap background task with exception handler
+            async def safe_proxy_runner():
+                try:
+                    await _run_proxy_server(port)
+                except Exception as e:
+                    logger.error(f"Proxy server crashed: {e}", exc_info=True)
+                    global _proxy_server_running
+                    _proxy_server_running = False
+
+            _proxy_server_task = asyncio.create_task(safe_proxy_runner())
+            _proxy_server_running = True
+
+            # Brief wait to ensure server starts cleanly
+            await asyncio.sleep(0.5)
+
+            # Health check: Verify proxy is responding
             try:
-                await _run_proxy_server(port)
+                import requests
+                response = requests.get(f"http://localhost:{port}/", timeout=1.0)
+                if response.status_code == 200:
+                    logger.info(f"✅ On-demand proxy started successfully on port {port}")
+                    return True
+                else:
+                    logger.warning(f"Proxy started but returned status {response.status_code}")
+                    return True  # Continue anyway - server task is running
             except Exception as e:
-                logger.error(f"Proxy server crashed: {e}", exc_info=True)
-                global _proxy_server_running
-                _proxy_server_running = False
-                # Allow graceful degradation - main server continues without proxy
+                logger.warning(f"Proxy started but health check failed: {e}")
+                return True  # Continue anyway - server task is running
 
-        _proxy_server_task = asyncio.create_task(safe_proxy_runner())
-        _proxy_server_running = True
-        # Give the server a moment to start
-        await asyncio.sleep(0.5)
-        logger.info(f"Proxy server started successfully on port {port}")
+        except Exception as e:
+            logger.error(f"❌ Failed to start on-demand proxy: {e}")
+            _proxy_server_running = False
+            return False
+
+    return _proxy_server_running
 
 
 async def _run_proxy_server(port: int = 8081):

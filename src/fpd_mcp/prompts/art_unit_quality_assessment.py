@@ -238,7 +238,7 @@ try:
                       if p.get('patentNumber')]
     ptab_challenges = 0
     for patent_num in granted_patents[:20]:  # Sample check
-        challenges = ptab_search_proceedings_minimal(patent_number=patent_num)
+        challenges = search_trials_minimal(patent_number=patent_num)
         if challenges and len(challenges.get('results', [])) > 0:
             ptab_challenges += 1
 
