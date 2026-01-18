@@ -626,7 +626,7 @@ function Show-KeyRequirements {
             Write-Host "Mistral API Key: [OPTIONAL] For OCR on scanned documents" -ForegroundColor Yellow
         }
         "*PTAB*" {
-            Write-Host "USPTO API Key:   [OPTIONAL] Not used by PTAB MCP" -ForegroundColor Yellow
+            Write-Host "USPTO API Key:   [REQUIRED] For accessing Open Data Portal PTAB API" -ForegroundColor Green
             Write-Host "Mistral API Key: [OPTIONAL] For OCR on scanned documents" -ForegroundColor Yellow
         }
         "*Citations*" {
