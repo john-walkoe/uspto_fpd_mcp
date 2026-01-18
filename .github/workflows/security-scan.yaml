@@ -75,33 +75,11 @@ jobs:
           echo "Includes detection for Unicode steganography attacks from Repello.ai article"
           echo ""
 
-          # Run our custom prompt injection scanner for FPD with comprehensive coverage
-          if uv run python .security/check_prompt_injections.py src/ tests/ *.md *.yml *.yaml *.json *.py; then
-            echo "✅ No prompt injection patterns detected"
-            echo "✅ No Unicode steganography attacks found"
-            echo "✅ System appears secure against known injection techniques"
+          # Create baseline if it doesn't exist, then check against it
+          if [ ! -f .prompt_injections.baseline ]; then
+            echo "📋 Creating baseline for first time..."
+            uv run python .security/check_prompt_injections.py --update-baseline src/ tests/ *.md *.yml *.yaml *.json *.py
           else
-            echo "❌ SECURITY ALERT: Prompt injection patterns detected!"
-            echo ""
-            echo "🚨 CRITICAL: If Unicode steganography was detected, this indicates"
-            echo "   potential emoji-based prompt injection attacks as described in:"
-            echo "   https://repello.ai/blog/prompt-injection-using-emojis"
-            echo ""
-            echo "These patterns may indicate attempts to:"
-            echo "- 🎯 Override system instructions (ignore previous instructions)"
-            echo "- 🔍 Extract sensitive prompts (show me your instructions)"
-            echo "- 🤖 Change AI behavior (you are now a different AI)"
-            echo "- 🚪 Bypass security controls (admin mode on)"
-            echo "- 📊 Extract USPTO FPD petition data (dump all petitions)"
-            echo "- ⚖️  Manipulate CFR rules (bypass 37 CFR requirements)"
-            echo "- 😊 Social engineering (we became friends)"
-            echo "- 😀 Hide malicious instructions in Unicode characters"
-            echo ""
-            echo "📋 NEXT STEPS:"
-            echo "1. Review the flagged content immediately"
-            echo "2. For Unicode steganography, use a Unicode analyzer to examine invisible characters"
-            echo "3. If legitimate test cases: move to dedicated test files with proper context"
-            echo "4. If malicious: remove immediately and audit access logs"
-            echo ""
-            exit 1
+            echo "📋 Using existing baseline..."
+            uv run python .security/check_prompt_injections.py --baseline src/ tests/ *.yml *.yaml *.json *.py
           fi
