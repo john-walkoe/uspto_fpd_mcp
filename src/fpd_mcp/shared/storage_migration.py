@@ -27,13 +27,13 @@ Usage:
         migrate_legacy_storage()
 """
 
-import logging
 from pathlib import Path
 from typing import Optional, Dict, Tuple
 
 from ..config.storage_paths import StoragePaths
+from .unified_logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def check_migration_needed() -> Tuple[bool, str]:

@@ -6,10 +6,10 @@ Implements USPTO's download limit of 5 files per 10 seconds per IP address.
 import time
 from collections import defaultdict, deque
 from typing import Dict, Deque
-import logging
 from ..config import api_constants
+from ..shared.unified_logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class RateLimiter:

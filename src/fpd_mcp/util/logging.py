@@ -5,11 +5,12 @@ Provides secure request/response logging with API key sanitization.
 """
 
 import httpx
-import logging
 import json
+import logging
 from typing import Dict, Any
+from ..shared.unified_logging import get_logger
 
-logger = logging.getLogger('fpd_mcp.logging_transport')
+logger = get_logger('fpd_mcp.logging_transport')
 
 
 class LoggingTransport(httpx.AsyncBaseTransport):
@@ -103,19 +104,6 @@ class LoggingTransport(httpx.AsyncBaseTransport):
                     logger.debug(f"REQUEST BODY (raw): {body}")
         except Exception as e:
             logger.debug(f"Error logging request body: {e}")
-
-
-def get_logger(name: str) -> logging.Logger:
-    """
-    Get a logger instance for the FPD MCP.
-
-    Args:
-        name: Logger name (typically module name)
-
-    Returns:
-        Configured logger instance
-    """
-    return logging.getLogger(f'fpd_mcp.{name}')
 
 
 def sanitize_api_key_in_message(message: str, api_key: str) -> str:

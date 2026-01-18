@@ -6,14 +6,14 @@ for API client, field manager, and other components. Implements dependency
 injection pattern to improve testability and maintainability.
 """
 
-import logging
 from typing import Dict, Any, Optional
 from ..api.fpd_client import FPDClient
 from ..config.field_manager import FieldManager
 from ..shared.cache import CacheManager, cached_method
 from ..shared.structured_logging import StructuredLogger, PerformanceTimer
+from ..shared.unified_logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class FPDService:

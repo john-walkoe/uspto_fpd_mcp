@@ -3,13 +3,13 @@ Shared error handling utilities for consistent error responses across the applic
 """
 
 import os
-import logging
 from typing import Dict, Any, Optional, Callable
 from functools import wraps
 import uuid
 from .log_sanitizer import LogSanitizer
+from .unified_logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def generate_request_id() -> str:

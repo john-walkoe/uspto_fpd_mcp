@@ -7,7 +7,6 @@ Requires USPTO API key (same as Patent File Wrapper).
 
 import asyncio
 import httpx
-import logging
 import json
 import os
 import random
@@ -20,9 +19,10 @@ from ..shared.circuit_breaker import CircuitBreaker
 from ..shared.cache import CacheManager
 from ..config.feature_flags import feature_flags
 from ..config import api_constants
+from ..shared.unified_logging import get_logger
 from .field_constants import FPDFields, QueryFieldNames
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class FPDClient:

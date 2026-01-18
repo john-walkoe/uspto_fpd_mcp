@@ -5,11 +5,11 @@ Manages loading and filtering of field configurations from YAML.
 """
 
 import yaml
-import logging
 from pathlib import Path
 from typing import Dict, List, Any, Optional
+from ..shared.unified_logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class FieldManager:

@@ -34,7 +34,6 @@ Code Duplication Fix:
 import os
 import secrets
 import sys
-import logging
 from pathlib import Path
 from typing import Optional
 
@@ -45,7 +44,10 @@ from fpd_mcp.shared.dpapi_crypto import encrypt_with_dpapi, decrypt_with_dpapi, 
 from fpd_mcp.config.storage_paths import StoragePaths
 from fpd_mcp.config.api_constants import DPAPI_ENTROPY_BYTES
 
-logger = logging.getLogger(__name__)
+# Import safe logger with automatic sanitization (CWE-532 fix)
+from fpd_mcp.shared.unified_logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class UnifiedSecureStorage:
@@ -443,8 +445,10 @@ def store_secure_api_key(key: str, key_name: str) -> bool:
 # Test function with proper logging
 if __name__ == "__main__":
     import logging
+    from fpd_mcp.shared.unified_logging import get_logger
+
     logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger(__name__)
+    logger = get_logger(__name__)
 
     logger.info("Testing Unified Secure Storage...")
 

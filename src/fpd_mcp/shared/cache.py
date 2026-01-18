@@ -8,12 +8,12 @@ and improve performance for repeated queries.
 import asyncio
 import hashlib
 import json
-import logging
 import time
 from typing import Any, Dict, Optional, Callable
 from functools import wraps
+from .unified_logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 try:
     from cachetools import TTLCache

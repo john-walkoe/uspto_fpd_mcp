@@ -230,8 +230,8 @@ class SecureStorage:
 
             # Warn if storing to shared PFW storage
             if self.using_shared_pfw_storage:
-                import logging
-                logger = logging.getLogger(__name__)
+                from fpd_mcp.shared.unified_logging import get_logger
+                logger = get_logger(__name__)
                 logger.info(f"Storing {key_name} to shared PFW storage: {self.storage_file}")
 
             # Load existing keys or create new structure
@@ -473,8 +473,9 @@ def store_secure_api_key(api_key: str, key_name: str = "USPTO_API_KEY") -> bool:
 if __name__ == "__main__":
     # Simple test/demo with proper logging
     import logging
+    from fpd_mcp.shared.unified_logging import get_logger
     logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger(__name__)
+    logger = get_logger(__name__)
 
     if len(sys.argv) > 1:
         if sys.argv[1] == "test":

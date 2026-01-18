@@ -26,6 +26,12 @@ class LogSanitizer:
 
     # Patterns for detecting and masking sensitive data
     SENSITIVE_PATTERNS = [
+        # USPTO API Keys (exactly 30 lowercase letters)
+        (r'\b([a-z]{30})\b', r'[USPTO_API_KEY]'),
+
+        # Mistral API Keys (exactly 32 alphanumeric characters)
+        (r'\b([A-Za-z0-9]{32})\b', r'[MISTRAL_API_KEY]'),
+
         # API keys and tokens
         (r'(api[_-]?key["\s:=]+)([a-zA-Z0-9]{20,})', r'\1[REDACTED]'),
         (r'(token["\s:=]+)([a-zA-Z0-9]{20,})', r'\1[REDACTED]'),

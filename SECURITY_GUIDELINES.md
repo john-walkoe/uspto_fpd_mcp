@@ -205,6 +205,105 @@ uv run python .security/check_prompt_injections.py test_file.py docs.md
 rm test_file.py docs.md
 ```
 
+## Logging Security
+
+### 🛡️ **Safe Logging Practices**
+
+**Use Safe Logger for All Logging:**
+```python
+# ✅ Correct - Use safe logger with automatic sanitization
+from fpd_mcp.shared.unified_logging import get_logger
+
+logger = get_logger(__name__)
+logger.info(f"Processing request: {request_data}")  # API keys auto-masked
+
+# ❌ Never do this - Unsafe logging can expose secrets
+import logging
+logger = logging.getLogger(__name__)
+logger.info(f"Using API key: {api_key}")  # API key exposed in logs
+```
+
+### 🔒 **Automatic Sensitive Data Masking**
+
+**The safe logger automatically masks:**
+- **USPTO API Keys** (exactly 30 lowercase letters): `abcdefghijklmnopqrstuvwxyz` → `[USPTO_API_KEY]`
+- **Mistral API Keys** (exactly 32 alphanumeric): `ABC123XYZ456DEF789GHI012jkl345MN` → `[MISTRAL_API_KEY]`
+- **Generic API keys**: `api_key=abc123def456...` → `api_key=[REDACTED]`
+- **Bearer tokens**: `Bearer token123...` → `Bearer [TOKEN]`
+- **Passwords**: `password=secret123` → `password=[REDACTED]`
+
+### 📁 **File-Based Logging with Audit Trail**
+
+**Log files are automatically created in `~/.uspto_fpd_mcp/logs/`:**
+
+```
+~/.uspto_fpd_mcp/logs/
+├── fpd_mcp.log      # Application logs (10MB max, 5 backups)
+└── security.log     # Security events (10MB max, 10 backups for compliance)
+```
+
+**Security Features:**
+- **File permissions**: 600 (owner read/write only) on Linux/macOS
+- **Directory permissions**: 700 (owner only) on Linux/macOS
+- **Automatic rotation**: 10MB max size per file
+- **Persistent audit trail**: Survives process restarts
+- **Separate security log**: For authentication failures, rate limit violations, etc.
+
+### 🚨 **Security Event Logging**
+
+**Use the dedicated security logger for sensitive operations:**
+```python
+import logging
+
+# Security events go to separate log file
+security_logger = logging.getLogger('security')
+
+# Examples
+security_logger.warning(f"Failed authentication attempt from IP: {client_ip}")
+security_logger.error(f"Rate limit exceeded for client: {client_ip}")
+security_logger.critical(f"Circuit breaker opened for API: {api_name}")
+security_logger.warning(f"Invalid API key format detected")
+```
+
+**When to use security logger:**
+- Authentication failures
+- Rate limit violations
+- Circuit breaker state changes
+- API key validation failures
+- Suspicious request patterns
+- Configuration changes
+
+### 🧪 **Testing Log Sanitization**
+
+```bash
+# Test USPTO API key masking
+uv run python -c "
+from fpd_mcp.shared.log_sanitizer import LogSanitizer
+sanitizer = LogSanitizer()
+text = 'API key: abcdefghijklmnopqrstuvwxyzabcd'
+result = sanitizer.sanitize_string(text)
+print(f'Input: {text}')
+print(f'Output: {result}')
+print('[PASS]' if 'USPTO_API_KEY' in result else '[FAIL]')
+"
+
+# Test file-based logging
+uv run python -c "
+from fpd_mcp.config.log_config import setup_logging
+import logging
+
+setup_logging('INFO')
+logger = logging.getLogger('test')
+logger.info('Application log test')
+
+security_logger = logging.getLogger('security')
+security_logger.warning('Security event test')
+"
+
+# Check log files created
+ls -la ~/.uspto_fpd_mcp/logs/
+```
+
 ## Error Handling Security
 
 ### 🛡️ **Secure Error Responses**

@@ -12,10 +12,12 @@ Retention Periods:
 - Error logs: 60 days (debugging window)
 - Audit logs: 365 days (legal/compliance)
 """
-import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Dict, Any
+from ..shared.unified_logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class LogRetentionPolicy:
@@ -44,7 +46,7 @@ class LogRetentionPolicy:
             log_dir: Directory containing log files
         """
         self.log_dir = log_dir
-        self.logger = logging.getLogger(__name__)
+        self.logger = get_logger(__name__)
 
     def cleanup_old_logs(self, dry_run: bool = False) -> Dict[str, Any]:
         """
@@ -209,7 +211,7 @@ def schedule_cleanup(log_dir: Path, dry_run: bool = False):
         Cleanup statistics
     """
     policy = LogRetentionPolicy(log_dir)
-    logger = logging.getLogger(__name__)
+    logger = get_logger(__name__)
 
     logger.info("Starting scheduled log cleanup")
 

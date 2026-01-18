@@ -7,11 +7,11 @@ and temporarily stopping requests when failure threshold is exceeded.
 
 import asyncio
 import time
-import logging
 from enum import Enum
 from typing import Callable, Any, Optional, Dict
+from .unified_logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class CircuitState(Enum):

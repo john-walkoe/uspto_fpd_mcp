@@ -45,6 +45,7 @@ Usage:
 import logging
 from functools import wraps
 from typing import Any, Callable, Optional, TypeVar
+from .unified_logging import get_logger
 
 
 # Type variables for better type hints
@@ -90,7 +91,7 @@ def safe_operation(
                 return func(*args, **kwargs)
             except exceptions as e:
                 # Get logger for the function's module
-                logger = logging.getLogger(func.__module__)
+                logger = get_logger(func.__module__)
 
                 # Use custom operation name or function name
                 name = operation_name or func.__name__
@@ -152,7 +153,7 @@ def safe_async_operation(
                 return await func(*args, **kwargs)
             except exceptions as e:
                 # Get logger for the function's module
-                logger = logging.getLogger(func.__module__)
+                logger = get_logger(func.__module__)
 
                 # Use custom operation name or function name
                 name = operation_name or func.__name__
@@ -210,7 +211,7 @@ def retry_on_failure(
         def wrapper(*args, **kwargs):
             import time
 
-            logger = logging.getLogger(func.__module__)
+            logger = get_logger(func.__module__)
             current_delay = delay_seconds
 
             for attempt in range(1, max_attempts + 1):
@@ -281,7 +282,7 @@ def retry_async_on_failure(
         async def wrapper(*args, **kwargs):
             import asyncio
 
-            logger = logging.getLogger(func.__module__)
+            logger = get_logger(func.__module__)
             current_delay = delay_seconds
 
             for attempt in range(1, max_attempts + 1):
@@ -349,7 +350,7 @@ def suppress_errors(
                 return func(*args, **kwargs)
             except exceptions as e:
                 if log_error:
-                    logger = logging.getLogger(func.__module__)
+                    logger = get_logger(func.__module__)
                     logger.debug(f"{func.__name__} suppressed error: {e}")
                 return None
 

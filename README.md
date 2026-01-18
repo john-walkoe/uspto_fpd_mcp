@@ -596,6 +596,7 @@ rm -f proxy_documents.db petition_links.db
 
 ### Security Features
 - **🔐 Windows DPAPI Secure Storage** - API keys encrypted with Windows Data Protection API (user-specific encryption)
+- **🛡️ Safe Logging with Auto-Sanitization** - All logging automatically masks API keys, tokens, and sensitive data; file-based audit trail with rotation in `~/.uspto_fpd_mcp/logs/`
 - **Environment variable API keys** - No hardcoded credentials anywhere in codebase
 - **Zero plain text API keys** - Secure storage option eliminates API keys from Claude Desktop config files
 - **Cross-platform security** - Automatic fallback to environment variables on non-Windows systems

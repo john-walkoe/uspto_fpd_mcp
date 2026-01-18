@@ -7,15 +7,15 @@ API connectivity, circuit breaker status, cache health, and dependencies.
 
 import asyncio
 import time
-import logging
 from typing import Dict, Any, List, Optional
 from enum import Enum
 from ..api.fpd_client import FPDClient
 from ..config.field_manager import FieldManager
 from ..shared.cache import CacheManager
 from ..shared.structured_logging import StructuredLogger
+from .unified_logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class HealthStatus(Enum):

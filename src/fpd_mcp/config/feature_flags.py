@@ -16,10 +16,10 @@ Usage:
         # Return error or use fallback
 """
 import os
-import logging
 from typing import Dict, Any, Optional
+from ..shared.unified_logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class FeatureFlags:

@@ -5,7 +5,6 @@ Provides browser-accessible download URLs while keeping USPTO API keys secure.
 Uses configurable port (via FPD_PROXY_PORT or PROXY_PORT environment variables).
 Default: 8081 to avoid conflicts with Patent File Wrapper MCP (port 8080).
 """
-import logging
 import re
 from typing import Dict, Any, Optional
 from contextlib import asynccontextmanager
@@ -24,8 +23,9 @@ from ..api.fpd_client import FPDClient
 from ..api.field_constants import FPDFields
 from .rate_limiter import rate_limiter
 from ..shared.error_utils import generate_request_id
+from ..shared.unified_logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Request size limit configuration
 MAX_REQUEST_SIZE = 1024 * 1024  # 1MB limit
