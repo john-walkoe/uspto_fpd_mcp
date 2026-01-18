@@ -527,6 +527,63 @@ Checking MCP server health...
 uspto_fpd: uv --directory /USER/uspto_fpd_mcp run fpd-mcp - ✓ Connected
 ```
 
+## 🔧 Claude Code CLI Configuration (Alternative Method)
+
+**When to use this:** If you have Claude Code CLI installed and want to use the `~/.claude.json` configuration file instead of running the full setup script.
+
+**Difference from setup scripts:**
+- **Setup scripts** (`linux_setup.sh`/`windows_setup.ps1`): Full installation with API key management, secure storage, and config merging
+- **Merge scripts** (below): Quick config merge only - assumes you already have API keys configured
+
+### Quick Merge for Claude Code CLI
+
+If you've already installed the FPD MCP and configured your API keys, you can quickly add it to Claude Code's `~/.claude.json` using the merge scripts:
+
+**Linux/macOS:**
+```bash
+cd ~/uspto_fpd_mcp
+./deploy/quick_merge_claude_config.sh
+```
+
+**Windows PowerShell:**
+```powershell
+cd C:\Users\YOUR_USERNAME\uspto_fpd_mcp
+python deploy\merge_fpd_to_claude_json.py
+```
+
+The merge script will:
+- ✅ Create a timestamped backup of your existing `~/.claude.json`
+- ✅ Add or update the `uspto_fpd` server configuration
+- ✅ Preserve all your existing MCP server configurations
+- ✅ Set secure file permissions (600)
+
+**Output Example:**
+```
+Creating backup: /home/USER/.claude.json.backup_20260117_143022
+Reading: /home/USER/.claude.json
+Writing: /home/USER/.claude.json
+
+✓ SUCCESS: USPTO FPD MCP configuration added to ~/.claude.json
+
+Configuration details:
+  - Server name: uspto_fpd
+  - Project directory: /home/USER/uspto_fpd_mcp
+  - Proxy port: 8081
+
+Next steps:
+  1. Restart Claude Code CLI
+  2. Run: claude mcp list
+  3. Verify uspto_fpd appears in the list
+
+Note: API keys are managed via DPAPI (Windows) or secure storage (Linux/macOS)
+      Use deploy/manage_api_keys.ps1 (Windows) to configure API keys
+```
+
+**Requirements:**
+- ✅ Must have `~/.claude.json` file (created by Claude Code CLI)
+- ✅ Must run from the `uspto_fpd_mcp` directory
+- ✅ API keys should already be configured in secure storage
+
 **Example Configuration Generated:**
 
 ```json
