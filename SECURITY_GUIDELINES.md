@@ -135,15 +135,48 @@ The USPTO FPD MCP includes advanced prompt injection detection to protect agains
 - Extract petition data ("dump all petition numbers")
 - Manipulate CFR rules ("override 37 CFR 1.181")
 
+### 📋 **Baseline System for False Positive Management**
+
+**The scanner uses a baseline system** to track known legitimate findings and only flag **NEW** patterns not in the baseline. This solves the problem of false positives from legitimate code (variable names like `prompt`, documentation containing "system", etc.) while maintaining protection against malicious injections.
+
+**How the Baseline Works:**
+1. `.prompt_injections.baseline` stores known findings with SHA256 fingerprints
+2. Scanner checks each finding against the baseline
+3. Only NEW findings not in baseline cause failures
+4. Legitimate code can exist without constant false positive warnings
+
+**Baseline Commands:**
+```bash
+# Check against existing baseline (only NEW findings fail)
+uv run python .security/check_prompt_injections.py --baseline src/ tests/ *.md
+
+# Update baseline with new legitimate findings
+uv run python .security/check_prompt_injections.py --update-baseline src/ tests/ *.md *.yml *.yaml *.json *.py
+
+# Force new baseline (overwrite existing)
+uv run python .security/check_prompt_injections.py --force-baseline src/ tests/ *.md *.yml *.yaml *.json *.py
+```
+
+**When to Update Baseline:**
+- **DO:** New legitimate code with "prompt" or "system" keywords
+- **DO:** Code refactoring that changes line numbers
+- **DON'T:** Malicious patterns detected (remove the code instead!)
+- **DON'T:** When you're unsure (ask for review first)
+
+For complete baseline system documentation, see [SECURITY_SCANNING.md - Prompt Injection Baseline System](./SECURITY_SCANNING.md#prompt-injection-baseline-system).
+
 ### 🔍 **Prompt Injection Detection**
 
 **Manual Scanning:**
 ```bash
-# Scan for prompt injection patterns
-uv run python .security/check_prompt_injections.py src/ tests/ *.md
+# Check against existing baseline (only NEW findings fail)
+uv run python .security/check_prompt_injections.py --baseline src/ tests/ *.md
+
+# Update baseline with new legitimate findings
+uv run python .security/check_prompt_injections.py --update-baseline src/ tests/ *.md *.yml *.yaml *.json *.py
 
 # Scan specific directories
-uv run python .security/check_prompt_injections.py src/fpd_mcp/
+uv run python .security/check_prompt_injections.py --baseline src/fpd_mcp/
 
 # Run via pre-commit hook
 uv run pre-commit run prompt-injection-check --all-files
@@ -158,7 +191,7 @@ uv run python .security/check_prompt_injections.py --verbose src/ tests/
 uv run pre-commit run prompt-injection-check --all-files
 
 # CI/CD integration (runs on push/PR)
-# See .github/workflows/security-scan.yaml
+# See .github/workflows/security-scan.yaml (auto-creates baseline on first run)
 ```
 
 ### 📋 **Attack Patterns Detected (70+)**

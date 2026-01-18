@@ -83,6 +83,176 @@ The scanner detects the following types of secrets:
 - **Binary steganography patterns** - Systematic use of invisible characters for encoding
 - **High steganography ratios** - Suspicious concentrations of invisible vs visible characters
 
+## Prompt Injection Baseline System
+
+The prompt injection scanner uses a **baseline system** to track known findings and only flag **NEW** patterns that are not in the baseline. This solves the problem of false positives from legitimate code and documentation while maintaining protection against malicious prompt injection attacks.
+
+### Why a Baseline System?
+
+The scanner was flagging legitimate patterns as "attacks":
+
+**Variable Names:**
+```python
+prompt = """Some prompt text"""        # Flagged as attack
+system = "some value"               # Flagged as attack
+class PromptTemplate:               # Flagged as attack
+def system_init(self):              # Flagged as attack
+```
+
+**Documentation:**
+```markdown
+Instructions for using the system  # Flagged as attack
+System health check                   # Flagged as attack
+```
+
+**Legitimate Unicode Characters:**
+- Emoji variation selectors in documentation
+- Unicode characters in prompt templates
+- Special characters in logging
+
+The baseline system allows legitimate code without compromising security - only NEW findings not in baseline cause failures.
+
+### How It Works
+
+1. **Baseline File**: `.prompt_injections.baseline` stores known findings
+2. **Fingerprinting**: Each finding gets a unique SHA256 hash fingerprint
+3. **Comparison**: Scanner checks if each finding is in the baseline
+4. **Exit Codes**:
+   - `0` - No NEW findings (all findings in baseline)
+   - `1` - NEW findings detected (not in baseline)
+   - `2` - Error occurred
+
+### Baseline File Format
+
+```json
+{
+  "src/fpd_mcp/shared/health_check.py": {
+    "abc123def456": {
+      "line": 2,
+      "match": "system"
+    },
+    "def789ghi012": {
+      "line": 4,
+      "match": "system"
+    }
+  },
+  "src/fpd_mcp/prompts/art_unit_quality_assessment.py": {
+    "ghi345jkl678": {
+      "line": 6,
+      "match": "prompt"
+    }
+  }
+}
+```
+
+### Baseline Commands
+
+| Option | Purpose |
+|--------|---------|
+| `--baseline` | Use existing baseline (only NEW findings fail) |
+| `--update-baseline` | Add new findings to baseline |
+| `--force-baseline` | Create new baseline (overwrite existing) |
+| `--verbose, -v` | Show detailed output with full matches |
+| `--quiet, -q` | Only show summary (suppress individual findings) |
+| `--include-security-files` | Check security documentation files |
+
+### Usage Examples
+
+**First Run - Create Baseline:**
+```bash
+# Scan and create baseline (will NOT fail if findings exist)
+uv run python .security/check_prompt_injections.py --update-baseline src/ tests/ *.md *.yml *.yaml *.json *.py
+```
+
+**Normal Run - Check Against Baseline:**
+```bash
+# Check for NEW findings only
+uv run python .security/check_prompt_injections.py --baseline src/ tests/ *.yml *.yaml *.json *.py
+```
+
+**Add New Legitimate Finding to Baseline:**
+```bash
+# Update baseline to include new legitimate finding
+uv run python .security/check_prompt_injections.py --update-baseline src/ tests/ *.md *.yml *.yaml *.json *.py
+```
+
+**Force New Baseline:**
+```bash
+# Overwrite existing baseline
+uv run python .security/check_prompt_injections.py --force-baseline src/ tests/ *.md *.yml *.yaml *.json *.py
+```
+
+### When to Update Baseline
+
+**DO Update Baseline When:**
+1. **New legitimate code** is flagged
+   - New variable/function names with "prompt" or "system"
+   - Documentation with these words
+   - Legitimate Unicode characters
+
+2. **Approved refactoring** changes line numbers
+   - Code moves (findings appear at new lines)
+   - File restructuring
+
+3. **Baseline is outdated**
+   - Many findings no longer exist in current code
+
+**DON'T Update Baseline When:**
+1. **Malicious pattern detected** - Remove the malicious code instead
+2. **You're unsure** - Ask for review first
+3. **Security-related finding** - Even if it looks "innocent", review carefully
+
+### GitHub Actions Integration
+
+The workflow automatically handles baselines:
+
+```yaml
+- name: Run prompt injection detection
+  run: |
+    # Create baseline if it doesn't exist, then check against it
+    if [ ! -f .prompt_injections.baseline ]; then
+      echo "📋 Creating baseline for first time..."
+      uv run python .security/check_prompt_injections.py --update-baseline src/ tests/ *.md *.yml *.yaml *.json *.py
+    else
+      echo "📋 Using existing baseline..."
+      uv run python .security/check_prompt_injections.py --baseline src/ tests/ *.yml *.yaml *.json *.py
+    fi
+```
+
+**Workflow Behavior:**
+
+| Scenario | GitHub Actions Result |
+|----------|----------------------|
+| First run (no baseline) | Creates baseline, passes |
+| Subsequent runs (no NEW findings) | Passes (findings in baseline) |
+| Subsequent runs (NEW findings) | Fails (requires review) |
+| Review finds legitimate false positive | Update baseline locally, push |
+
+### Managing the Baseline File
+
+**Add Baseline to Repository:**
+```bash
+git add .prompt_injections.baseline
+git commit -m "Add prompt injection baseline"
+git push
+```
+
+**Reviewing Baseline Changes:**
+```bash
+# See what changed in baseline
+git diff .prompt_injections.baseline
+```
+
+**Regenerating Baseline:**
+```bash
+# Regenerate from scratch (re-run full scan)
+uv run python .security/check_prompt_injections.py --force-baseline src/ tests/ *.md *.yml *.yaml *.json *.py
+
+# Review and commit
+git add .prompt_injections.baseline
+git commit -m "Regenerate prompt injection baseline"
+```
+
 ### Files Excluded from Scanning
 
 The following file patterns are excluded to reduce false positives:
@@ -92,7 +262,10 @@ The following file patterns are excluded to reduce false positives:
 - `package-lock.json` - NPM lock files
 - `*.lock` - Other lock files (Cargo.lock, poetry.lock, etc.)
 
-**Important:** While `CLAUDE.md` is in `.gitignore` and not scanned, all other files (including test files) are scanned to prevent accidental exposure.
+**Important:**
+- **Prompts directory IS scanned** - The baseline system allows legitimate prompt code while catching malicious injections
+- `CLAUDE.md` is in `.gitignore` and not scanned
+- All other files (including test files) are scanned to prevent accidental exposure
 
 ## Installation
 
@@ -142,13 +315,18 @@ pre-commit --version
 
 **🚨 CRITICAL:** The scanner now detects Unicode steganography attacks as described in the [Repello.ai article](https://repello.ai/blog/prompt-injection-using-emojis).
 
+**📋 BASELINE SYSTEM:** The scanner uses a baseline file to track known legitimate findings. See the [Prompt Injection Baseline System](#prompt-injection-baseline-system) section for complete details.
+
 **Manual Scanning:**
 ```bash
-# Comprehensive scan for prompt injection patterns (including Unicode steganography)
-uv run python .security/check_prompt_injections.py src/ tests/ *.md *.py
+# Check against existing baseline (only NEW findings fail)
+uv run python .security/check_prompt_injections.py --baseline src/ tests/ *.md *.py
+
+# Update baseline with new legitimate findings
+uv run python .security/check_prompt_injections.py --update-baseline src/ tests/ *.md *.yml *.yaml *.json *.py
 
 # Scan specific directories for all attack patterns
-uv run python .security/check_prompt_injections.py src/fpd_mcp/
+uv run python .security/check_prompt_injections.py --baseline src/fpd_mcp/
 
 # Include security files in scan (normally excluded)
 uv run python .security/check_prompt_injections.py --include-security-files src/ tests/
@@ -170,7 +348,7 @@ echo 'Hello!' > test_file.txt
 # If test_file.txt contains hidden Variation Selectors, scanner will detect them
 
 # Check specific file for invisible characters
-uv run python .security/check_prompt_injections.py suspicious_file.md
+uv run python .security/check_prompt_injections.py --baseline suspicious_file.md
 
 # Emergency scan when Unicode steganography is suspected
 uv run python .security/check_prompt_injections.py --verbose --include-security-files .
