@@ -106,71 +106,60 @@ else
     log_info "You can run the server with: uv run fpd-mcp"
 fi
 
-# Step 5: Secure API Key Configuration
+# Step 5: API Key Configuration
 echo ""
-echo "=========================================="
-echo "SECURE API KEY CONFIGURATION"
-echo "=========================================="
-echo ""
-log_info "API keys will be stored in ENCRYPTED secure storage"
-log_info "Location: ~/.uspto_api_key and ~/.mistral_api_key"
-log_info "Format: Secure file storage (Linux: file permissions 600)"
+log_info "API Key Configuration"
 echo ""
 
-# Collect USPTO API key with validation
-echo "Enter your USPTO API key (required - get from https://data.uspto.gov/myodp/):"
-echo -n "> "
-read -s USPTO_API_KEY  # Silent read (no echo to terminal)
+log_info "USPTO FPD MCP requires two API keys:"
+log_info "1. USPTO Open Data Portal API key (required)"
+log_info "2. Mistral API key (optional - for OCR document extraction)"
+echo ""
+log_info "Get your free USPTO API key from: https://data.uspto.gov/myodp/"
+log_info "Get your Mistral API key from: https://console.mistral.ai/"
 echo ""
 
-# Validate USPTO key format
-while ! validate_uspto_api_key "$USPTO_API_KEY"; do
-    echo ""
-    log_error "Invalid USPTO API key format"
-    echo "Expected: Exactly 30 lowercase letters (a-z)"
-    echo ""
-    echo "Enter your USPTO API key:"
-    echo -n "> "
-    read -s USPTO_API_KEY
-    echo ""
-done
+# Prompt for USPTO API key with validation (uses secure hidden input)
+USPTO_API_KEY=$(prompt_and_validate_uspto_key)
+if [[ -z "$USPTO_API_KEY" ]]; then
+    log_error "Failed to obtain valid USPTO API key"
+    exit 1
+fi
 
-echo ""
-log_success "USPTO API key format validated"
-
-# Collect Mistral API key with validation
-echo ""
-echo "Enter your Mistral API key (optional for OCR - press Enter to skip):"
-echo -n "> "
-read -s MISTRAL_API_KEY
+log_success "USPTO API key validated and configured"
 echo ""
 
-if [[ -n "$MISTRAL_API_KEY" ]]; then
-    # Validate Mistral key format
-    while ! validate_mistral_api_key "$MISTRAL_API_KEY"; do
-        echo ""
-        log_error "Invalid Mistral API key format"
-        echo "Expected: Exactly 32 alphanumeric characters (A-Z, a-z, 0-9)"
-        echo ""
-        echo "Enter your Mistral API key (or press Enter to skip):"
-        echo -n "> "
-        read -s MISTRAL_API_KEY
-        echo ""
+# Prompt for Mistral API key (optional)
+echo ""
+log_info "Mistral API key configuration (optional - for OCR document extraction)"
+read -p "Would you like to configure Mistral API key now? (Y/n): " CONFIGURE_MISTRAL
+CONFIGURE_MISTRAL=${CONFIGURE_MISTRAL:-Y}
 
-        # Allow empty to skip
-        if [[ -z "$MISTRAL_API_KEY" ]]; then
-            break
-        fi
-    done
+MISTRAL_API_KEY=""
+if [[ "$CONFIGURE_MISTRAL" =~ ^[Yy]$ ]]; then
+    MISTRAL_API_KEY=$(prompt_and_validate_mistral_key)
+    if [[ -z "$MISTRAL_API_KEY" ]]; then
+        log_warning "Failed to obtain valid Mistral API key - skipping"
+        log_info "You can configure it later using: ./deploy/manage_api_keys.sh"
+    else
+        log_success "Mistral API key validated and configured"
+    fi
+else
+    log_info "Skipping Mistral API key configuration"
+    log_info "You can configure it later using: ./deploy/manage_api_keys.sh"
 fi
 
 # Step 6: Store API keys in SECURE storage (NOT in config file!)
 echo ""
-log_info "Storing API keys in encrypted secure storage..."
+log_info "Storing API keys in secure storage..."
+log_info "Location: ~/.uspto_api_key and ~/.mistral_api_key (file permissions: 600)"
 echo ""
 
-# Store USPTO key using environment variable (NOT command line argument)
+# Store USPTO key using environment variable (more secure than command line)
 export SETUP_USPTO_KEY="$USPTO_API_KEY"
+if [[ -n "$MISTRAL_API_KEY" ]]; then
+    export SETUP_MISTRAL_KEY="$MISTRAL_API_KEY"
+fi
 
 STORE_RESULT=$(python3 << 'EOF'
 import sys
@@ -181,87 +170,66 @@ from pathlib import Path
 sys.path.insert(0, str(Path.cwd() / 'src'))
 
 try:
-    from fpd_mcp.shared_secure_storage import store_uspto_api_key
+    from fpd_mcp.shared_secure_storage import store_uspto_api_key, store_mistral_api_key
 
-    # Read from environment variable (NOT from command line - more secure)
-    api_key = os.environ.get('SETUP_USPTO_KEY', '')
-    if not api_key:
-        print('ERROR: No API key provided')
+    # Store USPTO key (required)
+    uspto_key = os.environ.get('SETUP_USPTO_KEY', '')
+    if not uspto_key:
+        print('ERROR: No USPTO API key provided')
         sys.exit(1)
 
-    if store_uspto_api_key(api_key):
-        print('SUCCESS')
-    else:
+    if not store_uspto_api_key(uspto_key):
         print('ERROR: Failed to store USPTO key')
         sys.exit(1)
+
+    # Store Mistral key (optional)
+    mistral_key = os.environ.get('SETUP_MISTRAL_KEY', '')
+    if mistral_key:
+        if not store_mistral_api_key(mistral_key):
+            print('ERROR: Failed to store Mistral key')
+            sys.exit(1)
+        print('SUCCESS:BOTH')
+    else:
+        print('SUCCESS:USPTO_ONLY')
+
 except Exception as e:
     print(f'ERROR: {str(e)}')
     sys.exit(1)
 EOF
 )
 
-# Clear environment variable immediately
+# Clear environment variables immediately
 unset SETUP_USPTO_KEY
+unset SETUP_MISTRAL_KEY
 
-if [[ "$STORE_RESULT" == "SUCCESS" ]]; then
+if [[ "$STORE_RESULT" == "SUCCESS:BOTH" ]]; then
+    log_success "USPTO and Mistral API keys stored in secure storage"
+    log_info "    USPTO Location: ~/.uspto_api_key"
+    log_info "    Mistral Location: ~/.mistral_api_key"
+    log_info "    Permissions: 600 (owner read/write only)"
+
+    # CRITICAL SECURITY: Set file permissions on both API key files
+    if [ -f "$HOME/.uspto_api_key" ]; then
+        set_secure_file_permissions "$HOME/.uspto_api_key"
+    fi
+
+    if [ -f "$HOME/.mistral_api_key" ]; then
+        set_secure_file_permissions "$HOME/.mistral_api_key"
+    fi
+
+elif [[ "$STORE_RESULT" == "SUCCESS:USPTO_ONLY" ]]; then
     log_success "USPTO API key stored in secure storage"
     log_info "    Location: ~/.uspto_api_key"
     log_info "    Permissions: 600 (owner read/write only)"
-    log_audit "USPTO API key configured via linux_setup.sh"
 
-    # Verify file permissions
+    # CRITICAL SECURITY: Set file permissions on USPTO API key file
     if [ -f "$HOME/.uspto_api_key" ]; then
-        PERMS=$(stat -c '%a' "$HOME/.uspto_api_key" 2>/dev/null || stat -f '%A' "$HOME/.uspto_api_key" 2>/dev/null)
-        if [[ "$PERMS" == "600" ]]; then
-            log_success "    Verified: File permissions are secure (600)"
-        else
-            log_warning "    Warning: File permissions are $PERMS (expected 600)"
-            # Try to fix
-            chmod 600 "$HOME/.uspto_api_key" 2>/dev/null || true
-        fi
+        set_secure_file_permissions "$HOME/.uspto_api_key"
     fi
+
 else
-    log_error "Failed to store USPTO API key: $STORE_RESULT"
+    log_error "Failed to store API keys: $STORE_RESULT"
     exit 1
-fi
-
-# Store Mistral key if provided
-if [[ -n "$MISTRAL_API_KEY" ]]; then
-    echo ""
-    export SETUP_MISTRAL_KEY="$MISTRAL_API_KEY"
-
-    STORE_RESULT=$(python3 << 'EOF'
-import sys
-import os
-from pathlib import Path
-
-sys.path.insert(0, str(Path.cwd() / 'src'))
-
-try:
-    from fpd_mcp.shared_secure_storage import store_mistral_api_key
-
-    api_key = os.environ.get('SETUP_MISTRAL_KEY', '')
-    if store_mistral_api_key(api_key):
-        print('SUCCESS')
-    else:
-        print('ERROR: Failed to store Mistral key')
-        sys.exit(1)
-except Exception as e:
-    print(f'ERROR: {str(e)}')
-    sys.exit(1)
-EOF
-)
-
-    unset SETUP_MISTRAL_KEY
-
-    if [[ "$STORE_RESULT" == "SUCCESS" ]]; then
-        log_success "Mistral API key stored in secure storage"
-        log_info "    Location: ~/.mistral_api_key"
-        log_info "    Permissions: 600 (owner read/write only)"
-        log_audit "Mistral API key configured via linux_setup.sh"
-    else
-        log_warning "Failed to store Mistral API key: $STORE_RESULT"
-    fi
 fi
 
 # CRITICAL: Clear sensitive variables from memory
@@ -269,10 +237,6 @@ unset USPTO_API_KEY
 unset MISTRAL_API_KEY
 unset SETUP_USPTO_KEY
 unset SETUP_MISTRAL_KEY
-
-echo ""
-log_success "API keys stored securely - NOT in Claude Code config file!"
-log_info "Keys will be loaded automatically from encrypted storage at runtime"
 
 # Step 7: PFW MCP Detection
 echo ""
@@ -448,67 +412,61 @@ except Exception as e:
     fi
 
     log_success "Claude Code configuration complete!"
-    log_audit "Claude Code configured via linux_setup.sh (no API keys in config)"
+
+    # Display configuration method used
+    echo ""
+    log_success "Security Configuration:"
+    log_info "  - USPTO API key stored in secure storage: ~/.uspto_api_key"
+    if [ -f "$HOME/.mistral_api_key" ]; then
+        log_info "  - Mistral API key stored in secure storage: ~/.mistral_api_key"
+    fi
+    log_info "  - File permissions: 600 (owner read/write only)"
+    log_info "  - API keys NOT in Claude Desktop config file"
+    log_info "  - Config directory permissions: 700 (owner only)"
+    log_info "  - Shared storage across all USPTO MCPs (PFW/PTAB/FPD/Citations)"
 else
-log_info "Skipping Claude Code configuration"
-    log_info "You can manually configure later"
+    log_info "Skipping Claude Code configuration"
+    log_info "You can manually configure later by editing $CLAUDE_CONFIG_FILE"
+    log_info "See README.md for configuration template"
 fi
 
 echo ""
-echo "=========================================="
-log_success "Linux setup complete!"
-echo "=========================================="
-echo ""
 
+# Step 9: Final Summary
+echo -e "${GREEN}[OK] Linux setup complete!${NC}"
 log_warning "Please restart Claude Code to load the MCP server"
-echo ""
 
+echo ""
 log_info "Configuration Summary:"
-echo ""
-log_success "✓ USPTO API Key: Stored in encrypted secure storage"
-log_info "    File: ~/.uspto_api_key (permissions: 600)"
-log_info "    Encryption: File permissions + Linux security"
-
+log_success "USPTO API Key: Stored in secure storage (~/.uspto_api_key)"
 if [ -f "$HOME/.mistral_api_key" ]; then
-    log_success "✓ Mistral API Key: Stored in encrypted secure storage"
-    log_info "    File: ~/.mistral_api_key (permissions: 600)"
-    log_info "    OCR: Enabled"
+    log_success "Mistral API Key: Stored in secure storage (~/.mistral_api_key)"
 else
-    log_info "ℹ Mistral API Key: Not configured (OCR disabled)"
+    log_warning "Mistral API Key: Not configured (optional - for OCR)"
 fi
+log_success "Dependencies: Installed"
+log_success "Package: Available as command"
+log_success "Installation Directory: $PROJECT_DIR"
+log_success "Security: File permissions 600 (owner only)"
+log_success "Security: Config directory permissions 700 (owner only)"
 
 echo ""
-log_success "✓ Installation Directory: $PROJECT_DIR"
-echo ""
-
-if [ -f "$HOME/.claude.json" ]; then
-    log_success "✓ Claude Code config: $HOME/.claude.json"
-    log_info "    API keys: NOT in config (loaded from secure storage)"
-
-    # Verify permissions
-    PERMS=$(stat -c '%a' "$HOME/.claude.json" 2>/dev/null || stat -f '%A' "$HOME/.claude.json" 2>/dev/null)
-    log_info "    Permissions: $PERMS"
-else
-    log_info "ℹ Claude Code config: Not configured"
-fi
-
-echo ""
-log_info "Security Features:"
-echo "  ✓ API keys stored in encrypted secure storage (NOT plain text)"
-echo "  ✓ File permissions: 600 on all sensitive files"
-echo "  ✓ Directory permissions: 700 on config directories"
-echo "  ✓ API key format validation (prevents typos)"
-echo "  ✓ Audit logging enabled (~/.uspto_mcp_audit.log)"
-echo ""
-
 log_info "Test the server:"
 echo "  uv run fpd-mcp --help"
-echo ""
 
+echo ""
 log_info "Test with Claude Code:"
-echo "  Ask Claude: 'Use fpd_search_petitions_minimal to search for patents'"
-echo ""
+echo "  Ask Claude: 'Use fpd_search_petitions_minimal to search for petitions'"
+echo "  Ask Claude: 'Use fpd_get_tool_reflections to learn about FPD MCP features'"
 
-log_info "Manage API keys:"
-echo "  Run: ./deploy/manage_api_keys.ps1 (Windows) or edit secure storage files"
+echo ""
+log_info "Verify MCP is running:"
+echo "  claude mcp list"
+
+echo ""
+log_info "Manage API keys later:"
+echo "  (Future enhancement - currently use deployment script to update)"
+
+echo ""
+echo -e "${GREEN}=== Setup Complete! ===${NC}"
 echo ""
