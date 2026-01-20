@@ -252,7 +252,7 @@ During the Windows setup, you'll be presented with two configuration methods:
 - ⚡ **Direct Python execution with built-in secure storage**
 - ✅ **No PowerShell execution policy requirements**
 
-**Example Configuration Generated:**
+**Example Quick Start Windows DPAPI Configuration Generated:**
 
 ```json
 {
@@ -264,7 +264,7 @@ During the Windows setup, you'll be presented with two configuration methods:
       "env": {
         "CENTRALIZED_PROXY_PORT": "none",
         "FPD_PROXY_PORT": "8081",
-        "INTERNAL_AUTH_SECRET": "your_selfgenerated_uspto_Cross_MCP_Shared_Secret"
+        "INTERNAL_AUTH_SECRET": "[RANDOM GENERATED SHARED SECRET ACROSS ALL AUTHOR'S USPTO MCPS]"
       }
     }
   }
@@ -278,7 +278,7 @@ During the Windows setup, you'll be presented with two configuration methods:
 - ⚡ **Direct Python execution**
 - ✅ **Simpler setup**
 
-**Example Configuration Generated:**
+**Example Quick Start Windows Traditional Configuration Generated:**
 
 ```json
 {
@@ -525,6 +525,29 @@ USER@debian:~/uspto_pfw_mcp# claude mcp list
 Checking MCP server health...
 
 uspto_fpd: uv --directory /USER/uspto_fpd_mcp run fpd-mcp - ✓ Connected
+```
+
+**Example Quick Start Linux Configuration Generated:**
+
+```json
+{
+  "mcpServers": {
+    "uspto_fpd": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/root/mcp/uspto_fpd_mcp",
+        "run",
+        "fpd-mcp"
+      ],
+      "env": {
+        "FPD_PROXY_PORT": "8081",
+        "CENTRALIZED_PROXY_PORT": "8080"
+        }
+      }
+    }
+  }
 ```
 
 ## 🔧 Claude Code CLI Configuration (Alternative Method)
