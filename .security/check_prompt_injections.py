@@ -39,7 +39,9 @@ BASELINE_FILE = Path('.prompt_injections.baseline')
 
 def get_fingerprint(filepath: Path, line_number: int, match: str) -> str:
     """Create a unique fingerprint for a finding."""
-    content = f"{filepath}:{line_number}:{match}"
+    # Normalize path to use forward slashes for cross-platform compatibility
+    normalized_path = filepath.as_posix()
+    content = f"{normalized_path}:{line_number}:{match}"
     return hashlib.sha256(content.encode()).hexdigest()[:16]
 
 
@@ -249,7 +251,8 @@ Baseline System:
 
                 # Filter findings against baseline
                 if baseline or args.update_baseline:
-                    baseline_file_key = str(file_path)
+                    # Normalize path to use forward slashes for cross-platform compatibility
+                    baseline_file_key = file_path.as_posix()
                     if baseline_file_key not in baseline:
                         baseline[baseline_file_key] = {}
 
@@ -286,7 +289,8 @@ Baseline System:
                     print(f"\n[!] Prompt injection patterns found in {file_path}:")
                     for line_num, match in findings:
                         fingerprint = get_fingerprint(file_path, line_num, match)
-                        in_baseline = baseline and fingerprint in baseline.get(str(file_path), {})
+                        # Use normalized path for cross-platform compatibility
+                        in_baseline = baseline and fingerprint in baseline.get(file_path.as_posix(), {})
                         status = " [BASELINE]" if in_baseline else " [NEW]" if (baseline or args.update_baseline) else ""
 
                         if args.verbose:
