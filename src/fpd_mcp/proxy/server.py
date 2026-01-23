@@ -293,6 +293,14 @@ def create_proxy_app(api_key: Optional[str] = None, port: Optional[int] = None) 
             # Get petition details with documents
             logger.info(f"Proxying download for petition {petition_id}, doc {document_identifier}, IP {client_ip}")
 
+            # Ensure API client is initialized (protects during server lifecycle events)
+            if api_client is None:
+                logger.error("API client not initialized in proxy server - lifespan may not have completed")
+                raise HTTPException(
+                    status_code=503,
+                    detail="Proxy server not ready - API client not initialized. Try again in a moment."
+                )
+
             # Get petition data to find the specific document
             petition_result = await api_client.get_petition_by_id(
                 petition_id,
@@ -378,6 +386,11 @@ def create_proxy_app(api_key: Optional[str] = None, port: Optional[int] = None) 
 
             # Stream the PDF from USPTO API
             async def stream_pdf():
+                # Ensure API client is initialized before accessing api_key
+                if api_client is None:
+                    logger.error("API client became None during streaming - async lifecycle issue")
+                    raise RuntimeError("API client lost during streaming response")
+
                 async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
                     # Use the API client's headers (includes X-API-KEY)
                     headers = {

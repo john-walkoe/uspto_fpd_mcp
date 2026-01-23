@@ -76,7 +76,28 @@ NOTE: fpd_get_petition_details is always-available because it provides document_
 """
 
 mcp = FastMCP("fpd-mcp", instructions=SERVER_INSTRUCTIONS)
-api_client = FPDClient(api_key=settings.uspto_api_key)
+api_client = None  # Deferred initialization via get_api_client() to prevent async lifecycle issues
+
+
+def get_api_client() -> FPDClient:
+    """
+    Get or create the global API client instance.
+
+    This factory function ensures the API client is properly initialized
+    before use, preventing async lifecycle errors when the global client
+    is None or in an invalid state.
+
+    Returns:
+        FPDClient: Initialized API client instance
+
+    Raises:
+        ValueError: If USPTO API key is not available
+    """
+    global api_client
+    if api_client is None:
+        logger.info("Initializing FPD API client (deferred initialization)")
+        api_client = FPDClient(api_key=settings.uspto_api_key)
+    return api_client
 
 # Register all prompt templates AFTER mcp object is created
 # This registers all 10 comprehensive prompt templates with the MCP server
@@ -478,6 +499,12 @@ fpd_search_petitions_minimal(query="machine learning", decision_type="DENIED", l
     if len(final_query) > 2000:
         raise ValidationError("Combined query too long (max 2000 characters)", generate_request_id())
 
+    # Ensure API client is initialized (protects against async lifecycle issues)
+    global api_client
+    if api_client is None:
+        logger.info("Initializing API client for minimal petition search")
+        api_client = get_api_client()
+
     # Get fields from field manager
     fields = field_manager.get_fields("petitions_minimal")
 
@@ -640,6 +667,12 @@ fpd_search_petitions_balanced(
         if len(final_query) > 2000:
             return format_error_response("Combined query too long (max 2000 characters)", 400)
 
+        # Ensure API client is initialized (protects against async lifecycle issues)
+        global api_client
+        if api_client is None:
+            logger.info("Initializing API client for balanced petition search")
+            api_client = get_api_client()
+
         # Get fields from field manager
         fields = field_manager.get_fields("petitions_balanced")
 
@@ -755,6 +788,12 @@ Returns balanced field set for cross-referencing with PFW examiner data and PTAB
                     "Date range must be in format YYYY-MM-DD:YYYY-MM-DD", 400
                 )
 
+        # Ensure API client is initialized (protects against async lifecycle issues)
+        global api_client
+        if api_client is None:
+            logger.info("Initializing API client for art unit petition search")
+            api_client = get_api_client()
+
         # Use API client's search_by_art_unit method
         result = await api_client.search_by_art_unit(
             art_unit=art_unit,
@@ -844,6 +883,12 @@ async def fpd_search_petitions_by_application(
 
         # Clean application number (remove spaces, slashes for query)
         clean_app_num = application_number.replace("/", "").replace(" ", "")
+
+        # Ensure API client is initialized (protects against async lifecycle issues)
+        global api_client
+        if api_client is None:
+            logger.info("Initializing API client for application petition search")
+            api_client = get_api_client()
 
         # Use API client's search_by_application method
         result = await api_client.search_by_application(
@@ -950,6 +995,12 @@ async def fpd_get_petition_details(
         # Input validation
         if not petition_id or len(petition_id.strip()) == 0:
             return format_error_response("Petition ID cannot be empty", 400)
+
+        # Ensure API client is initialized (protects against async lifecycle issues)
+        global api_client
+        if api_client is None:
+            logger.info("Initializing API client for petition detail retrieval")
+            api_client = get_api_client()
 
         # Use API client's get_petition_by_id method
         result = await api_client.get_petition_by_id(
@@ -1141,6 +1192,12 @@ Why both formats?
         else:
             # Centralized proxy is already running (managed by PFW MCP)
             logger.info("Using centralized proxy - no local proxy startup needed")
+
+        # Ensure API client is initialized (protects against async lifecycle issues)
+        global api_client
+        if api_client is None:
+            logger.info("Initializing API client for document download proxy")
+            api_client = get_api_client()
 
         # Construct proxy URL (port 8081 to avoid conflict with PFW proxy on 8080)
         proxy_url = f"http://localhost:{proxy_port}/download/{petition_id}/{document_identifier}"
@@ -1404,6 +1461,12 @@ For document selection strategies and cost optimization, use FPD_get_guidance('c
             logger.info(f"Local proxy server ready on port {proxy_port} for document extraction")
         else:
             logger.info("Using centralized proxy for document extraction - no local proxy startup needed")
+
+        # Ensure API client is initialized (protects against async lifecycle issues)
+        global api_client
+        if api_client is None:
+            logger.info("Initializing API client for document content extraction with OCR")
+            api_client = get_api_client()
 
         # Use API client's hybrid extraction method
         result = await api_client.extract_document_content_hybrid(

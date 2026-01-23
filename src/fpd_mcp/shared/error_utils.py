@@ -187,6 +187,22 @@ def async_tool_error_handler(tool_name: str):
                 logger.warning(f"Validation error in {tool_name}: {str(e)}")
                 return format_error_response(str(e), 400)
 
+            except RuntimeError as e:
+                # Catch async lifecycle errors specifically (fix for async lifecycle bug)
+                error_msg = str(e)
+                if "cannot schedule new futures" in error_msg or "interpreter shutdown" in error_msg:
+                    logger.error(f"Async lifecycle error in {tool_name}: {error_msg}")
+                    return format_error_response(
+                        "Operation failed due to async runtime issue. "
+                        "Try restarting the MCP server. "
+                        f"Technical details: {error_msg}",
+                        500
+                    )
+                else:
+                    # Other RuntimeError - treat as unexpected error
+                    logger.error(f"Runtime error in {tool_name}: {error_msg}", exc_info=True)
+                    return format_error_response(f"Runtime error: {error_msg}", 500)
+
             except Exception as e:
                 # Check if httpx is available and handle HTTP errors
                 error_type = type(e).__name__
