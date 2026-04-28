@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/john-walkoe-uspto-fpd-mcp-badge.png)](https://mseep.ai/app/john-walkoe-uspto-fpd-mcp)
+
 # USPTO Final Petition Decisions MCP Server
 
 A high-performance Model Context Protocol (MCP) server for the USPTO Final Petition Decisions API with token-saving **context reduction** capabilities, user-customizable fields, and **cross-MCP integration** for complete patent lifecycle analysis.
