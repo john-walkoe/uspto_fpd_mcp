@@ -1,0 +1,968 @@
+{
+  "CUSTOMIZATION.md": {
+    "6e3b44441c18c7b3": {
+      "line": 379,
+      "match": "system"
+    },
+    "f4999a2fe66416b0": {
+      "line": 316,
+      "match": "system"
+    }
+  },
+  "INSTALL.md": {
+    "7155c868ad8037e0": {
+      "line": 100,
+      "match": "system"
+    },
+    "d241e301f743d5b3": {
+      "line": 101,
+      "match": "system"
+    }
+  },
+  "SSO_SETUP.md": {
+    "4c4b566b790d4fae": {
+      "line": 11,
+      "match": "ignore"
+    }
+  },
+  "USAGE_EXAMPLES.md": {
+    "6ca779fc2c7c4248": {
+      "line": 376,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "a1df78102123b050": {
+      "line": 288,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    }
+  },
+  "src/fpd_mcp/auth/pages.py": {
+    "eaf68b827ce9cf77": {
+      "line": 14,
+      "match": "system"
+    }
+  },
+  "src/fpd_mcp/auth/provider.py": {
+    "0bf3556afe35e16e": {
+      "line": 306,
+      "match": "prompt"
+    }
+  },
+  "src/fpd_mcp/main.py": {
+    "347dc01ac332383e": {
+      "line": 116,
+      "match": "instructions"
+    },
+    "399dde204f73b126": {
+      "line": 66,
+      "match": "instructions"
+    },
+    "449f214c109c0a16": {
+      "line": 65,
+      "match": "instructions"
+    },
+    "47715a7f56be4a4c": {
+      "line": 65,
+      "match": "instruction"
+    },
+    "b70a7f93ba4582c1": {
+      "line": 65,
+      "match": "ignore"
+    }
+  },
+  "src/fpd_mcp/prompts/__init__.py": {
+    "0bc0544c68e852f6": {
+      "line": 33,
+      "match": "prompt"
+    },
+    "363828ae7bc98c11": {
+      "line": 4,
+      "match": "prompt"
+    },
+    "39cfd406cf875846": {
+      "line": 2,
+      "match": "Prompt"
+    },
+    "3f63f24165879a53": {
+      "line": 5,
+      "match": "prompt"
+    },
+    "6f34493d6ce21229": {
+      "line": 35,
+      "match": "prompts"
+    },
+    "7cb5efa8e17da036": {
+      "line": 16,
+      "match": "Prompts"
+    },
+    "b5afdfedf95e766e": {
+      "line": 8,
+      "match": "prompts"
+    }
+  },
+  "src/fpd_mcp/prompts/art_unit_quality_assessment.py": {
+    "1e949d6ebd1c6775": {
+      "line": 251,
+      "match": "prompt"
+    },
+    "acb349649d6edf53": {
+      "line": 152,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "c442c8b25673b5c0": {
+      "line": 6,
+      "match": "prompt"
+    },
+    "f61aec78c5b58eda": {
+      "line": 146,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    }
+  },
+  "src/fpd_mcp/prompts/company_petition_risk_assessment_pfw.py": {
+    "2fe354e17a250273": {
+      "line": 260,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "b2a5e1036fbba0b4": {
+      "line": 266,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "c84f69c4f64fa486": {
+      "line": 270,
+      "match": "prompt"
+    },
+    "f536fa6e86568f7c": {
+      "line": 6,
+      "match": "prompt"
+    }
+  },
+  "src/fpd_mcp/prompts/complete_portfolio_due_diligence_pfw_ptab.py": {
+    "3f24e6c45cec9ec5": {
+      "line": 311,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "449c3a401dffb44a": {
+      "line": 305,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "4d37da9345f351f6": {
+      "line": 251,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "513ac415d9908df1": {
+      "line": 245,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "953d39719675c08b": {
+      "line": 172,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "a547a328698f3425": {
+      "line": 304,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "b5f09bc85ebb796d": {
+      "line": 310,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "bc7fa74b2f498164": {
+      "line": 303,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "e08772a36aa6b7a7": {
+      "line": 309,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "ede224fa6659e719": {
+      "line": 470,
+      "match": "prompt"
+    },
+    "f388a252ce0daa58": {
+      "line": 166,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "fdd27d40ecd28e75": {
+      "line": 6,
+      "match": "prompt"
+    }
+  },
+  "src/fpd_mcp/prompts/examiner_dispute_citation_analysis.py": {
+    "1dc8cb9ab94c6038": {
+      "line": 6,
+      "match": "prompt"
+    },
+    "200c658ca04121cd": {
+      "line": 271,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "4db5ee2669a08097": {
+      "line": 277,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "4fcb47246cc76789": {
+      "line": 278,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "563f4412aea9f16e": {
+      "line": 279,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "77c507ba06a961b8": {
+      "line": 273,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "bc0382545f39b865": {
+      "line": 450,
+      "match": "prompt"
+    },
+    "ff8817099d9d4803": {
+      "line": 272,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    }
+  },
+  "src/fpd_mcp/prompts/litigation_research_setup_pfw.py": {
+    "27c4f4b11b88cada": {
+      "line": 485,
+      "match": "prompt"
+    },
+    "29b2ed9feb2eb14b": {
+      "line": 6,
+      "match": "prompt"
+    },
+    "9d7f120d5897f486": {
+      "line": 168,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "ab2999a85b12def9": {
+      "line": 162,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    }
+  },
+  "src/fpd_mcp/prompts/patent_vulnerability_assessment_ptab.py": {
+    "130824ca53f3555a": {
+      "line": 149,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "21b9adb7cd1bc2ca": {
+      "line": 155,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "236d689d373a7a81": {
+      "line": 259,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "5682b620a6d6422b": {
+      "line": 264,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "6c3ff5d7417e3387": {
+      "line": 258,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "98064ba63868ff0f": {
+      "line": 266,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "a52fc37fe6523e07": {
+      "line": 306,
+      "match": "prompt"
+    },
+    "ac0db517c701680c": {
+      "line": 265,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "ed070955d98a9ab7": {
+      "line": 260,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "f61dfb6aec0700d0": {
+      "line": 6,
+      "match": "prompt"
+    }
+  },
+  "src/fpd_mcp/prompts/petition_document_research_package.py": {
+    "72ac8823c29eab10": {
+      "line": 390,
+      "match": "prompt"
+    },
+    "a051d912cba8cd15": {
+      "line": 6,
+      "match": "prompt"
+    },
+    "ac712af16f584b87": {
+      "line": 224,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "ac917d9eada4b797": {
+      "line": 78,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "b25466a86e914ffc": {
+      "line": 84,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "b332f1cd145d4124": {
+      "line": 218,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    }
+  },
+  "src/fpd_mcp/prompts/petition_quality_with_citation_intelligence.py": {
+    "04be85d6c7032919": {
+      "line": 336,
+      "match": "prompt"
+    },
+    "27d11ebed17b1afa": {
+      "line": 223,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "320756bf464a0bf0": {
+      "line": 199,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "39c36cbeaf0c4883": {
+      "line": 6,
+      "match": "prompt"
+    },
+    "3b23e9208078f265": {
+      "line": 200,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "3fc69cb5d9764e89": {
+      "line": 230,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "45c108f9b0cbfc33": {
+      "line": 190,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "4e9d81195853a41f": {
+      "line": 207,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "6ef9db203273f76a": {
+      "line": 228,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "762f916119c4eec5": {
+      "line": 222,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "8385fd76768f6f29": {
+      "line": 99,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "90d6e771bae0d672": {
+      "line": 224,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "9543a921ac63dd37": {
+      "line": 184,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "9fa93d32fce835c0": {
+      "line": 198,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "a1ade2486f23e744": {
+      "line": 205,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "a93ac6f7ef850754": {
+      "line": 93,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "ab0da65008f9e9c0": {
+      "line": 206,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "b90684d5a2be9dce": {
+      "line": 204,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "e538d063e2979f12": {
+      "line": 201,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "f36dc32ee99b93c7": {
+      "line": 229,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    }
+  },
+  "src/fpd_mcp/prompts/prosecution_quality_correlation_pfw.py": {
+    "0c2b4e6c3f167bcc": {
+      "line": 246,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "151533467290022d": {
+      "line": 240,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "1fe3d80d3b5827b6": {
+      "line": 199,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "2eed5fbeaf3013e6": {
+      "line": 247,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "33a4ab537a42144e": {
+      "line": 193,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "4217679f71c0e740": {
+      "line": 221,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "765653adced5faf0": {
+      "line": 241,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "943ae79717156936": {
+      "line": 239,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "a2e71e425e08a4bd": {
+      "line": 216,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "b2aba2209130c705": {
+      "line": 223,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "c2b556bce39b57cc": {
+      "line": 215,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "c43920f518fa994d": {
+      "line": 245,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "c483f6f12521a5ba": {
+      "line": 6,
+      "match": "prompt"
+    },
+    "cc92d58a3c582629": {
+      "line": 444,
+      "match": "prompt"
+    },
+    "ccbeadf50f448d47": {
+      "line": 222,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "e7e8ee6505292c53": {
+      "line": 217,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    }
+  },
+  "src/fpd_mcp/prompts/revival_petition_analysis.py": {
+    "24df022c5dfb3ac8": {
+      "line": 152,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "9d9e91c7658e4484": {
+      "line": 6,
+      "match": "prompt"
+    },
+    "b9ee15bb9aa6bb03": {
+      "line": 236,
+      "match": "system"
+    },
+    "c28328c977cc1e78": {
+      "line": 158,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "e10d8f2693625056": {
+      "line": 363,
+      "match": "prompt"
+    },
+    "f277149deeb1a390": {
+      "line": 230,
+      "match": "system"
+    }
+  },
+  "src/fpd_mcp/proxy/models.py": {
+    "9e320a032b8a51dc": {
+      "line": 35,
+      "match": "ignore"
+    }
+  },
+  "src/fpd_mcp/proxy/server.py": {
+    "0cf715aa039b380f": {
+      "line": 152,
+      "match": "system"
+    }
+  },
+  "src/fpd_mcp/server_bootstrap.py": {
+    "90b072db235dbd22": {
+      "line": 444,
+      "match": "system"
+    }
+  },
+  "src/fpd_mcp/shared/health_check.py": {
+    "9e29b5aca2f1a849": {
+      "line": 2,
+      "match": "system"
+    },
+    "fe25b2b9efa8509d": {
+      "line": 4,
+      "match": "system"
+    }
+  },
+  "src/fpd_mcp/shared/injection_scan.py": {
+    "2a56664aa3004be3": {
+      "line": 49,
+      "match": "ignore"
+    },
+    "34927e6b14401062": {
+      "line": 36,
+      "match": "instructions"
+    },
+    "36a6d21dc1dc8565": {
+      "line": 44,
+      "match": "prompt"
+    },
+    "3f75f07de61d3b5d": {
+      "line": 64,
+      "match": "instructions"
+    },
+    "413042ac9795cc49": {
+      "line": 56,
+      "match": "prompts"
+    },
+    "5de7834dd39a093f": {
+      "line": 47,
+      "match": "system"
+    },
+    "68097b5f81a3beac": {
+      "line": 57,
+      "match": "prompts"
+    },
+    "71bed9775a027378": {
+      "line": 58,
+      "match": "system"
+    },
+    "8755228ac2fab123": {
+      "line": 56,
+      "match": "system"
+    },
+    "8fa720824cb23c38": {
+      "line": 58,
+      "match": "instructions"
+    },
+    "927cffb2aca49232": {
+      "line": 92,
+      "match": "instructions"
+    },
+    "9468ca01aa885316": {
+      "line": 47,
+      "match": "prompt"
+    },
+    "9642e57ae8ff76d5": {
+      "line": 44,
+      "match": "ignore"
+    },
+    "9fdebf9e88d625b2": {
+      "line": 35,
+      "match": "ignore"
+    },
+    "ae5818997592b040": {
+      "line": 51,
+      "match": "instructions"
+    },
+    "cc4b26c00a1a3162": {
+      "line": 58,
+      "match": "prompt"
+    },
+    "d4eb35254d63281e": {
+      "line": 57,
+      "match": "instructions"
+    },
+    "e0c844b965a7f93e": {
+      "line": 45,
+      "match": "instructions"
+    },
+    "e28adc16823e7d9c": {
+      "line": 32,
+      "match": "INSTRUCTIONS"
+    },
+    "e4077e571e8be942": {
+      "line": 45,
+      "match": "prompt"
+    },
+    "e4380d15a4c8f9eb": {
+      "line": 35,
+      "match": "instruction"
+    },
+    "e6b0ad6297486752": {
+      "line": 56,
+      "match": "instructions"
+    },
+    "ec8a306732691aa1": {
+      "line": 49,
+      "match": "instructions"
+    },
+    "efa1175289f5039b": {
+      "line": 5,
+      "match": "prompt"
+    },
+    "f6105040ce80595a": {
+      "line": 44,
+      "match": "instructions"
+    },
+    "f9b92c41a88449d5": {
+      "line": 5,
+      "match": "instruction"
+    },
+    "fa9ea408cc29b007": {
+      "line": 47,
+      "match": "instructions"
+    }
+  },
+  "src/fpd_mcp/shared/internal_auth.py": {
+    "afe1f6628c635b89": {
+      "line": 2,
+      "match": "System"
+    }
+  },
+  "src/fpd_mcp/ui/user_management_view.py": {
+    "8a2feef804d920e7": {
+      "line": 12,
+      "match": "system"
+    }
+  },
+  "src/fpd_mcp/ui/views.py": {
+    "68363c79cb2fd773": {
+      "line": 457,
+      "match": "system"
+    },
+    "b8aec4faae66192a": {
+      "line": 25,
+      "match": "system"
+    }
+  },
+  "src\\fpd_mcp\\prompts\\__init__.py": {
+    "31237e17f9a93fa5": {
+      "line": 5,
+      "match": "prompt"
+    },
+    "399db3cc087e492c": {
+      "line": 33,
+      "match": "prompt"
+    },
+    "817a6d7521d1eb3b": {
+      "line": 16,
+      "match": "Prompts"
+    },
+    "bd61af07d9ec02de": {
+      "line": 8,
+      "match": "prompts"
+    },
+    "d90c1d15de01396f": {
+      "line": 4,
+      "match": "prompt"
+    },
+    "eea79f426890b5a4": {
+      "line": 2,
+      "match": "Prompt"
+    }
+  },
+  "src\\fpd_mcp\\prompts\\art_unit_quality_assessment.py": {
+    "a851f5b9f1d4651c": {
+      "line": 6,
+      "match": "prompt"
+    },
+    "ee09e073c998b92f": {
+      "line": 152,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    }
+  },
+  "src\\fpd_mcp\\prompts\\company_petition_risk_assessment_pfw.py": {
+    "0a3bf1a2c657ab32": {
+      "line": 6,
+      "match": "prompt"
+    },
+    "1591081795c2decc": {
+      "line": 266,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    }
+  },
+  "src\\fpd_mcp\\prompts\\complete_portfolio_due_diligence_pfw_ptab.py": {
+    "46e8bed4fab0f2e8": {
+      "line": 311,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "85bbd70148a1cb7a": {
+      "line": 6,
+      "match": "prompt"
+    },
+    "9afee7afa34b1303": {
+      "line": 310,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "b60eaa7f0a74448e": {
+      "line": 251,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "d9b21a6c15399c49": {
+      "line": 309,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "ff557c2b8c10f500": {
+      "line": 172,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    }
+  },
+  "src\\fpd_mcp\\prompts\\examiner_dispute_citation_analysis.py": {
+    "37015567761e56a1": {
+      "line": 279,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "5f80f390fa8a7055": {
+      "line": 277,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "6fae3893b5ac7d4c": {
+      "line": 6,
+      "match": "prompt"
+    },
+    "e45a1016f3cbaa25": {
+      "line": 278,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    }
+  },
+  "src\\fpd_mcp\\prompts\\litigation_research_setup_pfw.py": {
+    "5ec0dcffdbb81074": {
+      "line": 6,
+      "match": "prompt"
+    },
+    "ee259e38b2428e49": {
+      "line": 168,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    }
+  },
+  "src\\fpd_mcp\\prompts\\patent_vulnerability_assessment_ptab.py": {
+    "046ad87675d3b751": {
+      "line": 6,
+      "match": "prompt"
+    },
+    "6462c024ae68a2b6": {
+      "line": 265,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "a4a8e64d71f5e492": {
+      "line": 155,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "c979d551e5084bc5": {
+      "line": 266,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "e79cc990183dc417": {
+      "line": 264,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    }
+  },
+  "src\\fpd_mcp\\prompts\\petition_document_research_package.py": {
+    "74eace164e29970a": {
+      "line": 6,
+      "match": "prompt"
+    },
+    "b88dc51485fa5146": {
+      "line": 224,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "d51eda369e77bcfc": {
+      "line": 84,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    }
+  },
+  "src\\fpd_mcp\\prompts\\petition_quality_with_citation_intelligence.py": {
+    "0cb23d47ec5a4ca6": {
+      "line": 190,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "29d8a9f2680c5df6": {
+      "line": 230,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "4e71a85f4d2bd2b2": {
+      "line": 228,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "54a8faf593ba8bde": {
+      "line": 206,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "6b22d04f76c077c4": {
+      "line": 6,
+      "match": "prompt"
+    },
+    "7e46129894f70689": {
+      "line": 229,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "b582a3c9ef5591fd": {
+      "line": 207,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "d19c853e9cc8ab7e": {
+      "line": 99,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "f1d9daca68071657": {
+      "line": 205,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "f50956fd07ed8941": {
+      "line": 204,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    }
+  },
+  "src\\fpd_mcp\\prompts\\prosecution_quality_correlation_pfw.py": {
+    "0c786205023f08d9": {
+      "line": 247,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "21eaaf3de8d36e25": {
+      "line": 246,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "32d0ca9f04128b5f": {
+      "line": 6,
+      "match": "prompt"
+    },
+    "3dcfedbbb918cb53": {
+      "line": 199,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "726a34fae524cdf0": {
+      "line": 222,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "7632cdad7e8126aa": {
+      "line": 221,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "95be34c039703796": {
+      "line": 223,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "f3169cd88763eecd": {
+      "line": 245,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    }
+  },
+  "src\\fpd_mcp\\prompts\\revival_petition_analysis.py": {
+    "00a1aee60d519261": {
+      "line": 236,
+      "match": "system"
+    },
+    "da81bde99370d12e": {
+      "line": 158,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "fc131ed328716eaf": {
+      "line": 6,
+      "match": "prompt"
+    }
+  },
+  "src\\fpd_mcp\\shared\\health_check.py": {
+    "366c62d94e02adde": {
+      "line": 4,
+      "match": "system"
+    },
+    "76775b7caa696374": {
+      "line": 2,
+      "match": "system"
+    }
+  },
+  "src\\fpd_mcp\\shared\\internal_auth.py": {
+    "b706d58c90fde5f5": {
+      "line": 2,
+      "match": "System"
+    }
+  },
+  "tests/TEST_SUITE.md": {
+    "5cda2437d70d39b2": {
+      "line": 90,
+      "match": "Variation Selector steganography detected (1 selectors)"
+    },
+    "617a17e5bd4e2daf": {
+      "line": 153,
+      "match": "prompt"
+    },
+    "6a5fe3b3d4eac3ad": {
+      "line": 142,
+      "match": "system"
+    },
+    "adbd647ebb667bfc": {
+      "line": 150,
+      "match": "prompt"
+    }
+  },
+  "tests/test_injection_scan.py": {
+    "5a1e16c114ddf4da": {
+      "line": 23,
+      "match": "instructions"
+    },
+    "5bee4da7754117ce": {
+      "line": 23,
+      "match": "system"
+    },
+    "95297205c728e747": {
+      "line": 23,
+      "match": "ignore"
+    },
+    "a57b0a4be5e30e61": {
+      "line": 23,
+      "match": "prompt"
+    },
+    "df4c4fce12183031": {
+      "line": 122,
+      "match": "ignore"
+    },
+    "f25c1af940d7f16f": {
+      "line": 23,
+      "match": "output your system prompt"
+    },
+    "fc4af6ed4259c540": {
+      "line": 23,
+      "match": "ignore the previous instructions"
+    }
+  },
+  "tests/test_unified_key_management.py": {
+    "1f36b10fab2027a5": {
+      "line": 6,
+      "match": "system"
+    }
+  },
+  "tests/test_unified_storage.py": {
+    "4c3035e3df3d3f24": {
+      "line": 5,
+      "match": "system"
+    },
+    "732c8e9bfc82c41c": {
+      "line": 248,
+      "match": "system"
+    },
+    "c1e29b182ee8b9ec": {
+      "line": 260,
+      "match": "system"
+    }
+  },
+  "tests\\test_unified_key_management.py": {
+    "5921ffae2852892a": {
+      "line": 6,
+      "match": "system"
+    }
+  },
+  "tests\\test_unified_storage.py": {
+    "7fb7f30a7a388d33": {
+      "line": 5,
+      "match": "system"
+    },
+    "e164603dc7983240": {
+      "line": 248,
+      "match": "system"
+    }
+  }
+}

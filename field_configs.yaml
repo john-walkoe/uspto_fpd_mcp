@@ -1,0 +1,111 @@
+# Final Petition Decisions MCP Field Configuration
+# Progressive Workflow: Minimal → User Selection → Balanced → Document Analysis
+# Customize field sets by uncommenting fields you want (remove the # symbol)
+
+version: "1.0"
+description: "Final Petition Decisions MCP Field Configuration - Progressive workflow for petition analysis"
+
+predefined_sets:
+  petitions_minimal:
+    description: "Ultra-minimal fields for petition searches (95-99% context reduction)"
+    fields:
+      # === ESSENTIAL FIELDS FOR DISCOVERY ===
+      - petitionDecisionRecordIdentifier   # Unique petition ID (UUID) - Required
+      - applicationNumberText              # Links to PFW MCP
+      - patentNumber                       # Links to PTAB MCP (if granted)
+      - firstApplicantName                 # Petitioner/applicant name
+      - decisionTypeCodeDescriptionText    # GRANTED/DENIED/DISMISSED
+      - petitionMailDate                   # When petition filed
+      - decisionDate                       # When Director decided
+      - finalDecidingOfficeName            # Office that decided
+
+      # === ADDITIONAL FIELDS (UNCOMMENT TO ADD) ===
+      # - decisionPetitionTypeCode          # Petition type code (551, etc.)
+      # - decisionPetitionTypeCodeDescriptionText  # Petition type description
+      # - groupArtUnitNumber                # Art unit number (→ PFW cross-ref)
+      # - technologyCenter                  # Technology center
+      # - businessEntityStatusCategory      # Small/Undiscounted
+      # - prosecutionStatusCodeDescriptionText  # Prosecution status
+      # - inventionTitle                    # Patent title
+
+      # === LEGAL CONTEXT ===
+      # - petitionIssueConsideredTextBag    # Issues raised (array)
+      # - ruleBag                           # CFR rules cited (array)
+      # - statuteBag                        # Statutes cited (array)
+
+      # === COURT INFORMATION ===
+      # - courtActionIndicator              # Court involvement (boolean)
+      # - actionTakenByCourtName            # Court name if involved
+
+      # === ADDITIONAL METADATA ===
+      # - inventorBag                       # All inventors (array)
+      # - customerNumber                    # Correspondence address
+      # - firstInventorToFileIndicator      # AIA indicator (Y/N)
+      # - decisionMailDate                  # When decision mailed
+      # - prosecutionStatusCode             # Prosecution status code
+      # - lastIngestionDateTime             # Data freshness
+
+  petitions_balanced:
+    description: "Key fields for petition searches (80-88% context reduction)"
+    fields:
+      # === ALL MINIMAL FIELDS (ALWAYS INCLUDED) ===
+      - petitionDecisionRecordIdentifier
+      - applicationNumberText
+      - patentNumber
+      - firstApplicantName
+      - decisionTypeCodeDescriptionText
+      - petitionMailDate
+      - decisionDate
+      - finalDecidingOfficeName
+
+      # === ADDITIONAL BALANCED FIELDS ===
+      - decisionPetitionTypeCode           # Petition type code (551, etc.)
+      - decisionPetitionTypeCodeDescriptionText  # Petition type description
+      - groupArtUnitNumber                 # Art unit (→ PFW cross-ref)
+      - technologyCenter                   # TC context
+      - prosecutionStatusCodeDescriptionText  # Prosecution status
+      - petitionIssueConsideredTextBag     # Issues raised (array)
+      - ruleBag                            # CFR rules cited (array)
+      - statuteBag                         # Statutes cited (array)
+      - businessEntityStatusCategory       # Entity status
+      - inventionTitle                     # Patent title
+
+      # === OPTIONAL ADDITIONAL FIELDS ===
+      # - inventorBag                       # All inventors (array)
+      # - courtActionIndicator              # Court involvement (boolean)
+      # - actionTakenByCourtName            # Court name if involved
+      # - customerNumber                    # Correspondence address
+      # - firstInventorToFileIndicator      # AIA indicator (Y/N)
+      # - decisionMailDate                  # When decision mailed
+      # - prosecutionStatusCode             # Prosecution status code
+      # - lastIngestionDateTime             # Data freshness
+
+# Context management settings
+context_settings:
+  max_minimal_results: 100
+  max_balanced_results: 20
+  max_document_results: 50
+
+# Usage Instructions:
+# 1. PETITION SEARCHES:
+#    - Edit 'petitions_minimal' for fpd_search_petitions_minimal
+#    - Edit 'petitions_balanced' for fpd_search_petitions_balanced
+# 2. Uncomment fields you want by removing the # symbol
+# 3. After editing, restart Claude Desktop to reload configuration
+
+# Field Optimization Notes:
+# - Minimal searches: Optimized for high-volume discovery (50-100 results)
+# - Balanced searches: Optimized for detailed analysis after user selection
+# - Required fields (petitionDecisionRecordIdentifier, applicationNumberText) should always remain uncommented
+
+# IMPORTANT CROSS-REFERENCE FIELDS:
+# - applicationNumberText: Links to Patent File Wrapper MCP for prosecution history
+# - patentNumber: Links to PTAB MCP for post-grant challenges (if granted)
+# - groupArtUnitNumber: Links to PFW for art unit analysis
+# - firstApplicantName: Party matching across PFW and PTAB MCPs
+#
+# PETITION RED FLAGS (for quality assessment):
+# - ruleBag containing "37 CFR 1.137": Revival petitions (abandoned application)
+# - ruleBag containing "37 CFR 1.181": Petitions for supervisory review (examiner disputes)
+# - ruleBag containing "37 CFR 1.182": Petitions for reconsideration (restriction issues)
+# - decisionTypeCodeDescriptionText: "DENIED": Unsuccessful petition (potential quality issue)

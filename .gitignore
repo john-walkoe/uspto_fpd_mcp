@@ -1,0 +1,88 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+.env
+
+# IDE
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Environment variables - NEVER commit secrets!
+.env
+.env.local
+.env.*.local
+*.env
+.env.*
+!.env.example
+
+# Claude assistant reference file with API keys
+
+# Logs
+*.log
+logs/
+
+# OS
+Thumbs.db
+
+# uv lock file
+
+# Project specific files to exclude (per user request)
+tests/archive/
+
+# Claude assistant documents
+Claude_Documents/
+
+# Proxy persistent-link cache (never commit the Fernet key)
+.fpd_proxy_encryption_key
+fpd_proxy_link_cache.db
+fpd_proxy_link_cache.db-*
+
+# OAuth auth store (SQLite) — users + AS state, never commit
+data/
+*.db-wal
+*.db-shm
+
+# Local-only code-review reports
+audits/
+CLAUDE.md

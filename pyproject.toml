@@ -1,0 +1,87 @@
+[project]
+name = "fpd-mcp"
+version = "1.0.0"
+description = "MCP server for USPTO Final Petition Decisions data"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "John Walkoe" }
+]
+
+dependencies = [
+    "fastmcp[apps]>=3.4",
+    "aiosqlite>=0.20",
+    "starlette>=0.40.0",
+    "httpx>=0.28.1",
+    "pydantic>=2.10.6",
+    "pydantic-settings>=2.7.1",
+    "pyyaml>=6.0.2",
+    "python-dotenv>=1.0.1",
+    "click>=8.2.1",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "cryptography>=42.0.0",
+    "requests>=2.31.0",
+    "detect-secrets>=1.5.0",
+    "pypdf>=6.14.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.4",
+    "pytest-asyncio>=0.25.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.2.0",
+    "pre-commit>=4.5.0",
+    "pytest>=8.3.4",
+    "pytest-asyncio>=0.25.2",
+    "ruff>=0.15.21",
+]
+
+[project.scripts]
+fpd-mcp = "fpd_mcp.main:run_server"
+fpd-proxy = "fpd_mcp.proxy.server:run_proxy_cli"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# test_unified_key_management.py / test_unified_storage.py overwrite the REAL
+# DPAPI-stored keys; they are also gated by FPD_RUN_KEY_TESTS inside each
+# module (defense in depth).
+addopts = "--ignore=tests/test_unified_key_management.py --ignore=tests/test_unified_storage.py"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src"]
+
+[tool.ruff.lint]
+# E/F/W: pycodestyle+pyflakes; C90: cyclomatic complexity gate (audit
+# code-quality-metrics-standards.md ran with no committed config)
+select = ["E", "F", "W", "C90"]
+ignore = ["E501"]  # long lines: docstrings/guidance text dominate
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+# Composition root re-exports public names for back-compat
+"src/fpd_mcp/main.py" = ["F401", "E402"]
+# Bootstrap ordering requires imports after Settings()/logging init
+"src/fpd_mcp/runtime.py" = ["E402"]
+# load_dotenv() must run before these imports resolve env-derived config
+# (pre-existing ordering, unrelated to the Phase 6B module split)
+"src/fpd_mcp/proxy/server.py" = ["E402"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+check_untyped_defs = false
+follow_imports = "silent"
