@@ -1,6 +1,7 @@
-# L-25: no dependency advisory gate existed. uv.lock pins a reproducible
-# resolved set, which is why this was a LOW rather than a HIGH, but nothing
-# told the operator when one of those pins gained an advisory.
+# Dependency update surveillance. uv.lock pins a reproducible resolved set;
+# this is what tells the operator when one of those pins gains an advisory.
+# Security updates always; routine minor/patch bumps are grouped into one PR
+# to keep the noise down. Same file in all four USPTO MCP repos.
 version: 2
 updates:
   - package-ecosystem: "uv"
@@ -10,6 +11,13 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
+    groups:
+      python-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "github-actions"
     directory: "/"
