@@ -1,5 +1,7 @@
 """Prosecution Quality Correlation - Correlate examiner patterns with petition frequency"""
 
+from ._flags import flag
+
 
 async def prosecution_quality_correlation_prompt(
     art_unit: str = "",
@@ -24,6 +26,10 @@ async def prosecution_quality_correlation_prompt(
 
     Returns comprehensive correlation analysis between prosecution patterns and petition frequency for quality assessment.
     """
+    # R-2: accept any encoding a caller sends (True, 'True', 'yes',
+    # '1'); the emitted template compares the normalized literal.
+    statistical_analysis = flag(statistical_analysis)
+
     return f"""Prosecution Quality Correlation Analysis - Examiner Performance Assessment
 
 Inputs Provided:
@@ -60,7 +66,7 @@ try:
 
     if "{examiner_name}":
         # Individual examiner analysis
-        pfw_results = pfw_search_applications_minimal(
+        pfw_results = PFW_search_applications_minimal(
             examiner_name="{examiner_name}",
             filing_date_start=date_start,
             fields=['applicationNumberText', 'patentNumber',
@@ -74,7 +80,7 @@ try:
 
     elif "{art_unit}":
         # Art unit group analysis
-        pfw_results = pfw_search_applications_minimal(
+        pfw_results = PFW_search_applications_minimal(
             art_unit="{art_unit}",
             filing_date_start=date_start,
             fields=['applicationNumberText', 'patentNumber',
@@ -119,7 +125,7 @@ for app in prosecution_data[:50]:  # Limit to 50 to prevent context explosion
     app_num = app.get('applicationNumberText')
 
     try:
-        petitions = fpd_search_petitions_by_application(
+        petitions = FPD_Search_petitions_by_application(
             application_number=app_num,
             include_documents=False
         )
@@ -142,7 +148,7 @@ for app in prosecution_data[:50]:  # Limit to 50 to prevent context explosion
 
                 # Get petition type
                 try:
-                    details = fpd_get_petition_details(petition_id=petition_id, include_documents=False)
+                    details = FPD_Get_petition_details(petition_id=petition_id, include_documents=False)
                     rules = details.get('ruleBag', [])
 
                     if any('1.137' in rule for rule in rules):
@@ -287,7 +293,7 @@ Step 2: Validate analysis feasibility:
 Step 3: Comprehensive prosecution pattern analysis using targeted fields:
 ```python
 # CRITICAL: Use minimal search with fields parameter for efficient data retrieval
-pfw_search_applications_minimal(
+PFW_search_applications_minimal(
     query=pfw_query + ' AND filingDate:[start_date TO end_date]',
     fields=[
         'applicationNumberText',
@@ -330,7 +336,7 @@ Prosecution Performance Metrics:
 Step 4: Cross-reference prosecution with petition data:
 For each application from PFW data:
 ```
-fpd_search_petitions_by_application(
+FPD_Search_petitions_by_application(
     application_number=app_number,
     include_documents=False
 )

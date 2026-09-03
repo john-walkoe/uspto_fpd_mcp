@@ -138,9 +138,9 @@ The `field_configs.yaml` file contains professional petition analysis fields org
 - Optimal for cross-MCP integration and comprehensive assessment
 
 **Stage 3: Document Extraction (Targeted)**
-- Use `fpd_get_petition_details` only for selected petitions
+- Use `FPD_Get_petition_details` only for selected petitions
 - Include document bag only when document analysis is required
-- Strategic approach to minimize context usage and costs
+- Strategic approach to minimize context usage
 
 ### Field Selection by Use Case
 

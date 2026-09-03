@@ -4,7 +4,7 @@ Posts PDF bytes to a running docling-serve instance via /v1/convert/file.
 Supports local Docker (e.g. http://localhost:5001) or remote instances
 (e.g. https://docling.example.com).
 
-Docling is the third extraction tier (PyPDF2 -> Mistral OCR -> Docling) and
+Docling is the third extraction tier (pypdf -> Mistral OCR -> Docling) and
 is intended for SHORT scanned filings. FPD petition decisions are typically
 5-50 pages (much shorter than PTAB filings), and EasyOCR processing scales
 ~10-30s/page on CPU — larger documents should go to Mistral OCR instead,
@@ -32,6 +32,18 @@ _DEFAULT_TIMEOUT = 300.0   # 5 minutes — EasyOCR scales ~10-30s/page on CPU
 _DEFAULT_MAX_PAGES = 25    # FPD petition decisions are usually short
 
 
+def _env_number(name: str, default, cast):
+    """Parse a numeric env var, falling back to `default` on garbage."""
+    raw = os.getenv(name, "")
+    if not raw.strip():
+        return default
+    try:
+        return cast(raw)
+    except (TypeError, ValueError):
+        logger.warning("Invalid %s=%r; using default %s", name, raw, default)
+        return default
+
+
 class DoclingClient:
     """REST client for docling-serve PDF extraction.
 
@@ -41,16 +53,27 @@ class DoclingClient:
 
     def __init__(self) -> None:
         self.url: Optional[str] = os.getenv("DOCLING_SERVE_URL", "").strip() or None
-        self.timeout = float(os.getenv("DOCLING_TIMEOUT", str(_DEFAULT_TIMEOUT)))
-        self.max_pages = int(os.getenv("DOCLING_MAX_PAGES", str(_DEFAULT_MAX_PAGES)))
+        # F-D2: this client is constructed per call, inside the extraction
+        # fallback, so an unparseable env value used to raise ValueError from
+        # a constructor whose caller maps ValueError to a 400 "extraction
+        # failed" — a configuration error reported to the user as a bad
+        # request. Parse defensively, like mistral_ocr_max_pages() does.
+        self.timeout = _env_number("DOCLING_TIMEOUT", _DEFAULT_TIMEOUT, float)
+        self.max_pages = _env_number("DOCLING_MAX_PAGES", _DEFAULT_MAX_PAGES, int)
 
     def is_available(self) -> bool:
         """Return True if DOCLING_SERVE_URL is configured."""
         return bool(self.url)
 
     def within_page_limit(self, page_count: int) -> bool:
-        """Return True if page_count is within the DOCLING_MAX_PAGES threshold."""
-        return page_count <= self.max_pages
+        """Return True if page_count is a known size within DOCLING_MAX_PAGES.
+
+        L-18: an unknown page count arrives here as 0, which satisfied
+        `0 <= 25` and admitted a document of entirely unknown size to the
+        tier whose whole page cap exists to keep a 300-second CPU extraction
+        bounded. Unknown is now a refusal, not a pass.
+        """
+        return isinstance(page_count, int) and 0 < page_count <= self.max_pages
 
     async def extract(self, pdf_content: bytes, filename: str = "document.pdf") -> str:
         """Send PDF bytes to docling-serve and return extracted plain text.

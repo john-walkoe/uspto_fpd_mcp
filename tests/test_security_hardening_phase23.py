@@ -189,21 +189,28 @@ class TestMistralDailySpendCeiling:
         fpd_client_module._mistral_daily_cost_state["date"] = None
         fpd_client_module._mistral_daily_cost_state["total"] = 0.0
 
-    def test_unset_budget_is_unlimited(self, monkeypatch):
+    def test_unset_budget_uses_the_default_ceiling(self, monkeypatch):
+        """M-21: an unset budget used to mean UNLIMITED, so the only control
+        on metered third-party spend was off out of the box. It now falls
+        back to a finite default; an explicit 0 still means unlimited."""
+        from fpd_mcp.services.document_extraction import (
+            _DEFAULT_MISTRAL_DAILY_BUDGET_USD,
+        )
+
         monkeypatch.delenv("MISTRAL_OCR_DAILY_BUDGET_USD", raising=False)
-        allowed, _current, budget = fpd_client_module._mistral_daily_spend_check(1000.0)
-        assert allowed is True
-        assert budget == 0.0
+        allowed, _current, budget = fpd_client_module._mistral_daily_spend_reserve(1000.0)
+        assert allowed is False
+        assert budget == pytest.approx(_DEFAULT_MISTRAL_DAILY_BUDGET_USD)
 
     def test_zero_budget_is_unlimited(self, monkeypatch):
         monkeypatch.setenv("MISTRAL_OCR_DAILY_BUDGET_USD", "0")
-        allowed, _current, _budget = fpd_client_module._mistral_daily_spend_check(1000.0)
+        allowed, _current, _budget = fpd_client_module._mistral_daily_spend_reserve(1000.0)
         assert allowed is True
 
     def test_small_budget_blocks_once_exceeded(self, monkeypatch):
         monkeypatch.setenv("MISTRAL_OCR_DAILY_BUDGET_USD", "0.001")
         fpd_client_module._mistral_daily_spend_add(0.0009)
-        allowed, current, budget = fpd_client_module._mistral_daily_spend_check(0.001)
+        allowed, current, budget = fpd_client_module._mistral_daily_spend_reserve(0.001)
         assert allowed is False
         assert current == pytest.approx(0.0009)
         assert budget == pytest.approx(0.001)
@@ -211,20 +218,24 @@ class TestMistralDailySpendCeiling:
     def test_spend_resets_on_utc_day_change(self):
         fpd_client_module._mistral_daily_cost_state["date"] = dt.date(2000, 1, 1)
         fpd_client_module._mistral_daily_cost_state["total"] = 999.0
-        allowed, current, _budget = fpd_client_module._mistral_daily_spend_check(0.001)
+        allowed, current, _budget = fpd_client_module._mistral_daily_spend_reserve(0.001)
         assert current == 0.0
         assert allowed is True
 
     @pytest.mark.asyncio
     async def test_extract_with_mistral_ocr_blocks_before_any_network_call(self, monkeypatch):
-        """A tiny budget must reject the call with a clear error naming the
-        env var, before any upload/OCR HTTP call is attempted."""
+        """A tiny budget must reject the call before any upload/OCR HTTP call
+        is attempted. The raised message is deliberately neutral (no dollar
+        figures, no budget mechanics) — the accounting detail goes to the
+        server-side log only."""
         monkeypatch.setenv("MISTRAL_OCR_DAILY_BUDGET_USD", "0.0000001")
         monkeypatch.setenv("MISTRAL_API_KEY", "fake-mistral-key")
 
         client = FPDClient(api_key="uspto-test-key")
-        with pytest.raises(ValueError, match="MISTRAL_OCR_DAILY_BUDGET_USD"):
+        with pytest.raises(ValueError, match="OCR capacity limit reached") as exc_info:
             await client.extract_with_mistral_ocr(b"%PDF-1.4 fake content", page_count=1)
+        assert "$" not in str(exc_info.value)
+        assert "MISTRAL_OCR_DAILY_BUDGET_USD" not in str(exc_info.value)
 
 
 # --------------------------------------------------------------------- M6
@@ -232,25 +243,25 @@ class TestMistralDailySpendCeiling:
 
 class TestPypdfMigrationAndPageCap:
     @pytest.mark.asyncio
-    async def test_extract_with_pypdf2_uses_pypdf_and_returns_tuple(self):
+    async def test_extract_with_pypdf_uses_pypdf_and_returns_tuple(self):
         client = FPDClient(api_key="k")
         pdf_bytes = _make_blank_pdf(3)
-        text, truncated = await client.extract_with_pypdf2(pdf_bytes, max_pages=10)
+        text, truncated = await client.extract_with_pypdf(pdf_bytes, max_pages=10)
         assert isinstance(text, str)
         assert truncated is False
 
     @pytest.mark.asyncio
-    async def test_extract_with_pypdf2_truncates_over_cap(self):
+    async def test_extract_with_pypdf_truncates_over_cap(self):
         client = FPDClient(api_key="k")
         pdf_bytes = _make_blank_pdf(5)
-        _text, truncated = await client.extract_with_pypdf2(pdf_bytes, max_pages=2)
+        _text, truncated = await client.extract_with_pypdf(pdf_bytes, max_pages=2)
         assert truncated is True
 
     @pytest.mark.asyncio
-    async def test_extract_with_pypdf2_default_cap_is_200(self):
+    async def test_extract_with_pypdf_default_cap_is_200(self):
         client = FPDClient(api_key="k")
         pdf_bytes = _make_blank_pdf(3)
-        _text, truncated = await client.extract_with_pypdf2(pdf_bytes)
+        _text, truncated = await client.extract_with_pypdf(pdf_bytes)
         assert truncated is False
 
 

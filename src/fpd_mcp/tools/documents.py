@@ -1,7 +1,7 @@
 """Document download + content-extraction tools (SD-1 god-module split).
 
-FPD_get_document_download / FPD_get_document_content_with_mistral_ocr, plus
-the viewer_key / elicitation / proxy-registration helpers they share.
+FPD_get_document_download / FPD_get_document_content_with_ocr, plus
+the viewer_key / proxy-registration helpers they share.
 Extracted from main.py (mechanical decomposition, no behavior change).
 """
 
@@ -21,6 +21,7 @@ from ..server_bootstrap import _ensure_proxy_server_running, get_local_proxy_por
 from ..shared.error_utils import (
     ValidationError,
     async_tool_error_handler,
+    document_not_located_response,
     format_error_response,
 )
 from ..shared.injection_scan import (
@@ -28,11 +29,40 @@ from ..shared.injection_scan import (
     _WARNING_NOTE,
     scan_text,
 )
+from ..shared.response_bounds import apply_text_window, content_char_budget
 from ..util.identity import get_viewer_key
 from ..util.secure_logger import get_secure_logger
 from ..validators import validate_document_identifier, validate_petition_id
 
 logger = get_secure_logger(__name__)
+
+#: Recovery text embedded in `_window.note` — names the exact tool and
+#: parameter that fetches the remainder.
+_CONTENT_WINDOW_NOTE = (
+    "Only part of the extracted text is shown. Re-call "
+    "FPD_get_document_content_with_ocr(petition_id='{petition_id}', "
+    "document_identifier='{document_identifier}', char_offset=<_window.next_offset>) "
+    "to continue from where this window ended; raise max_chars to widen it."
+)
+
+#: Canonical marker sub-key -> this repo's pre-existing top-level key, kept
+#: alongside `_window` for this release.
+_CONTENT_WINDOW_ALIASES = {"applied": "truncated", "note": "truncation_note"}
+
+#: F-X2: overall budget for one content-extraction tool call, in seconds.
+_DEFAULT_TOOL_DEADLINE_SECONDS = 150.0
+
+
+def _tool_deadline_seconds() -> float:
+    """FPD_TOOL_DEADLINE_SECONDS; an unparseable value uses the default."""
+    raw = os.getenv("FPD_TOOL_DEADLINE_SECONDS", "")
+    if not raw.strip():
+        return _DEFAULT_TOOL_DEADLINE_SECONDS
+    try:
+        return max(1.0, float(raw))
+    except (TypeError, ValueError):
+        logger.warning("Invalid FPD_TOOL_DEADLINE_SECONDS; using the default")
+        return _DEFAULT_TOOL_DEADLINE_SECONDS
 
 
 def _resolve_document_metadata(
@@ -59,8 +89,8 @@ def _resolve_document_metadata(
             break
 
     if not document_metadata:
-        return format_error_response(
-            f"Document {document_identifier} not found in petition {petition_id}", 404
+        return document_not_located_response(
+            petition_result, petition_id, document_identifier
         )
 
     # Resolve the USPTO PDF download URL from the document metadata
@@ -82,64 +112,6 @@ def _resolve_document_metadata(
         "pdf_download_url": pdf_download_url,
         "page_count": page_count,
     }
-
-
-def _client_supports_url_elicitation(ctx) -> bool:
-    """True only if the client advertised URL-mode elicitation in initialize.
-
-    The gate is load-bearing (Issue A in the FOR-CLAUDE-FABLE heads-up doc):
-    clients without the capability — claude.ai's connector — never answer
-    the elicitation/create request, so an un-timed await parks the tool
-    coroutine forever and the client surfaces a generic tool error.
-    """
-    try:
-        caps = ctx.session.client_params.capabilities
-        return bool(caps.elicitation and caps.elicitation.url)
-    except Exception:
-        return False
-
-
-async def _maybe_elicit_downloads_page(
-    ctx: Optional["Context"],
-    download_registry_id: Optional[str],
-    viewer_key: str,
-    enhanced_filename: str,
-) -> Optional[str]:
-    """URL-mode elicitation: offer to open the downloads page in the
-    browser. STRICTLY optional UX sugar — Issue A in the FOR-CLAUDE-FABLE
-    heads-up doc: clients that don't support URL elicitation (claude.ai)
-    never answer the server→client round-trip and an un-timed await hangs
-    the tool call indefinitely. So it is capability-gated on the client's
-    advertised elicitation.url, timeout-bounded as belt-and-braces, and
-    never load-bearing. Extracted from fpd_get_document_download
-    (mechanical decomposition, no behavior change).
-
-    Returns the elicitation action ("accept"/etc.) or None.
-    """
-    if ctx is None or not download_registry_id or not _client_supports_url_elicitation(ctx):
-        return None
-    try:
-        local_port = get_local_proxy_port()
-        page_base = (
-            os.getenv("FPD_PROXY_BASE_URL", "").strip().rstrip("/")
-            or f"http://localhost:{local_port}"
-        )
-        downloads_page_url = f"{page_base}/downloads?highlight={download_registry_id}&s={viewer_key}"
-        elicit_result = await asyncio.wait_for(
-            ctx.session.elicit_url(
-                message=(
-                    f"Download link ready: {enhanced_filename}. "
-                    "Open the FPD downloads page in your browser?"
-                ),
-                url=downloads_page_url,
-                elicitation_id=download_registry_id,
-            ),
-            timeout=30.0,
-        )
-        return getattr(elicit_result, "action", None)
-    except Exception as elicit_error:
-        logger.debug(f"URL elicitation skipped (client support): {type(elicit_error).__name__}")
-        return None
 
 
 async def _register_download_via_proxy(payload: Dict[str, Any]) -> Optional[str]:
@@ -173,14 +145,12 @@ async def _deliver_download_link(
     pdf_download_url: str,
     page_count: int,
     proxy_port: Optional[int],
-    ctx: Optional["Context"],
 ) -> Dict[str, Any]:
     """Resolve a (centralized or local) proxy download link, register it
-    with the recent-downloads registry, offer URL-mode elicitation, and
-    build the tool response. Extracted from fpd_get_document_download
-    (mechanical decomposition, no behavior change) — the viewer_key +
-    elicitation logic live here since they only make sense once a download
-    link exists.
+    with the recent-downloads registry, and build the tool response.
+    Extracted from fpd_get_document_download (mechanical decomposition, no
+    behavior change) — the viewer_key logic lives here since it only makes
+    sense once a download link exists.
     """
     # Metadata for the enhanced filename
     petition_mail_date = petition_data[0].get(FPDFields.PETITION_MAIL_DATE)
@@ -259,10 +229,6 @@ async def _deliver_download_link(
         "viewer_key": viewer_key,
     })
 
-    elicitation_action = await _maybe_elicit_downloads_page(
-        ctx, download_registry_id, viewer_key, enhanced_filename
-    )
-
     return {
         "success": True,
         "petition_id": petition_id,
@@ -274,7 +240,7 @@ async def _deliver_download_link(
         "page_count": page_count,
         "expires_in_days": 7,
         "download_id": download_registry_id,
-        "downloads_page_opened": elicitation_action == "accept",
+        "downloads_page_opened": False,
 
         "proxy_info": {
             "mode": proxy_mode,
@@ -308,12 +274,13 @@ async def fpd_get_document_download(
     ctx: Context = None
 ) -> Dict[str, Any]:
     """Generate browser-accessible download URL for petition documents (PDFs) via secure proxy.
+Download, PDF, file, link, URL, save, open in a browser, get a copy of a petition or decision.
 
 **ALWAYS-ON PROXY (DEFAULT):** Proxy server starts with MCP - download links work immediately.
 
 **Workflow:**
-1. fpd_get_petition_details(petition_id='uuid', include_documents=True) → get documentBag
-2. fpd_get_document_download(petition_id='uuid', document_identifier='ABC123') → get download link
+1. FPD_Get_petition_details(petition_id='uuid', include_documents=True) → get documentBag
+2. FPD_get_document_download(petition_id='uuid', document_identifier='ABC123') → get download link
 3. Provide download link to user
 
 **CRITICAL RESPONSE FORMAT - Always format with BOTH clickable link and raw URL:**
@@ -367,8 +334,64 @@ Why both formats?
         pdf_download_url=resolved["pdf_download_url"],
         page_count=resolved["page_count"],
         proxy_port=proxy_port,
-        ctx=ctx,
     )
+
+
+def _validate_content_params(
+    petition_id: str,
+    document_identifier: str,
+    char_offset: int,
+    max_chars: Optional[int],
+) -> Optional[Dict[str, Any]]:
+    """Return an error envelope for the first invalid parameter, else None.
+    The identifier validators are re-run by the caller so their normalized
+    values are the ones actually used."""
+    if not petition_id or len(petition_id.strip()) == 0:
+        return format_error_response("Petition ID cannot be empty", 400)
+    if not document_identifier or len(document_identifier.strip()) == 0:
+        return format_error_response("Document identifier cannot be empty", 400)
+    if char_offset < 0:
+        return format_error_response("char_offset must be non-negative", 400)
+    if max_chars is not None and max_chars < 1:
+        return format_error_response("max_chars must be at least 1", 400)
+    try:
+        validate_petition_id(petition_id)
+        validate_document_identifier(document_identifier)
+    except ValidationError as e:
+        return format_error_response(str(e), 400, e.request_id)
+    return None
+
+
+def _window_extracted_content(
+    result: Dict[str, Any],
+    petition_id: str,
+    document_identifier: str,
+    char_offset: int,
+    max_chars: Optional[int],
+) -> None:
+    """Put a cursor over the extracted text.
+
+    The caller explicitly asked for document text, so the ceiling is the
+    higher CONTENT budget — the guard is against pathological size, and the
+    cursor makes the remainder REACHABLE instead of lost. A document that
+    already fits is left untouched (no `_window` key). The injection scan
+    deliberately runs on the FULL text before this, so a later window's
+    content is flagged up front.
+    """
+    prior_truncation_note = result.get("truncation_note")
+    apply_text_window(
+        result,
+        "extracted_content",
+        offset=char_offset,
+        max_chars=min(max_chars, content_char_budget()) if max_chars else None,
+        note=_CONTENT_WINDOW_NOTE.format(
+            petition_id=petition_id, document_identifier=document_identifier
+        ),
+        aliases=_CONTENT_WINDOW_ALIASES,
+    )
+    if prior_truncation_note and result.get("truncation_note") != prior_truncation_note:
+        # An OCR page cap AND a text window both applied — report both.
+        result["truncation_note"] = f"{prior_truncation_note} {result['truncation_note']}"
 
 
 @async_tool_error_handler("document_content")
@@ -376,14 +399,17 @@ async def fpd_get_document_content(
     petition_id: str,
     document_identifier: str,
     auto_optimize: bool = True,
+    char_offset: int = 0,
+    max_chars: Optional[int] = None,
     ctx: Context = None
 ) -> Dict[str, Any]:
-    """Extract full text from USPTO petition documents with intelligent hybrid extraction (PyPDF2 -> Mistral OCR -> Docling).
+    """Extract full text from USPTO petition documents with intelligent hybrid extraction (pypdf -> OCR -> Docling).
+Read, extract, text, contents, full document, OCR, quote the petition, the decision, or the Office's reasoning.
 
-PREREQUISITE: First use fpd_get_petition_details to get document_identifier from documentBag.
-Auto-optimizes cost: free PyPDF2 for text-based PDFs, ~$0.001/page Mistral OCR only for scanned documents.
+PREREQUISITE: First use FPD_Get_petition_details to get document_identifier from documentBag.
+Auto-optimizes extraction: fast direct pypdf text extraction for text-based PDFs, OCR only for scanned documents.
 MISTRAL_API_KEY is optional - without it, scanned documents fall back to Docling
-(self-hosted, free) when DOCLING_SERVE_URL is configured and the document is
+(self-hosted) when DOCLING_SERVE_URL is configured and the document is
 <= DOCLING_MAX_PAGES (default 25 - petition decisions are usually short).
 
 USE CASES:
@@ -393,28 +419,37 @@ USE CASES:
 - Correlate petition text with PTAB challenge strategies
 - Profile examiner behavior from supervisory review petitions
 
-COST OPTIMIZATION:
-- auto_optimize=True (default): Try free PyPDF2 first, fallback to Mistral OCR if needed (70% cost savings)
-- auto_optimize=False: Use Mistral OCR directly (~$0.001/page)
+EXTRACTION MODES:
+- auto_optimize=True (default): Try fast pypdf first, fall back to OCR only when the document is scanned
+- auto_optimize=False: Use OCR directly (slower; highest fidelity for scanned documents)
 
-Returns: extracted_content, extraction_method, processing_cost_usd, page_count
+Returns: extracted_content, extraction_method, page_count
+
+LARGE DOCUMENTS - CURSOR:
+- char_offset (default 0): where to start reading in the extracted text
+- max_chars (default USPTO_MAX_CONTENT_CHARS, 120,000): window size
+When the text is longer than the window, the response carries a `_window`
+block: {unit, offset, returned, total, has_more, next_offset}. Pass
+`_window.next_offset` back as char_offset to read the next window - nothing
+is lost, it is paged. Windows snap to `=== PAGE N ===` boundaries when the
+OCR tier emitted them (unit='page'), otherwise they are raw character slices
+(unit='char').
 
 Example workflow:
-1. fpd_get_petition_details(petition_id='0b71b685-...', include_documents=True)
-2. fpd_get_document_content(petition_id='0b71b685-...', document_identifier='DSEN5APWPHOENIX')
+1. FPD_Get_petition_details(petition_id='0b71b685-...', include_documents=True)
+2. FPD_get_document_content_with_ocr(petition_id='0b71b685-...', document_identifier='DSEN5APWPHOENIX')
 3. Analyze extracted text for legal arguments, issues, and patterns
+4. If _window.has_more: re-call with char_offset=_window.next_offset
 
-For document selection strategies and cost optimization, use FPD_get_guidance('cost')."""
+For document selection and extraction-tier strategies, use FPD_get_guidance('extraction')."""
     # Input validation (M4: shape-checked, not just non-empty)
-    if not petition_id or len(petition_id.strip()) == 0:
-        return format_error_response("Petition ID cannot be empty", 400)
-    if not document_identifier or len(document_identifier.strip()) == 0:
-        return format_error_response("Document identifier cannot be empty", 400)
-    try:
-        petition_id = validate_petition_id(petition_id)
-        document_identifier = validate_document_identifier(document_identifier)
-    except ValidationError as e:
-        return format_error_response(str(e), 400, e.request_id)
+    invalid = _validate_content_params(
+        petition_id, document_identifier, char_offset, max_chars
+    )
+    if invalid is not None:
+        return invalid
+    petition_id = validate_petition_id(petition_id)
+    document_identifier = validate_document_identifier(document_identifier)
 
     # Ensure API client is initialized (protects against async lifecycle issues)
     # (Content extraction downloads directly from the USPTO API — no proxy hop.)
@@ -429,13 +464,34 @@ For document selection strategies and cost optimization, use FPD_get_guidance('c
             except Exception:
                 pass
 
-    # Use API client's hybrid extraction method
-    result = await api_client.extract_document_content_hybrid(
-        petition_id=petition_id,
-        document_identifier=document_identifier,
-        auto_optimize=auto_optimize,
-        progress_cb=_progress
-    )
+    # F-X2: one deadline over the whole tool call. Serially this can spend a
+    # petition fetch (3 x 30s), a PDF download (60s), a pypdf parse, a Mistral
+    # upload + OCR (2 x 60s) and then Docling (300s). Nothing budgeted the
+    # sum, so the worst case exceeded a typical client tool timeout and the
+    # caller saw a transport failure with no envelope, no request id and no
+    # recovery note — the outcome the response-size guard exists to avoid on
+    # the size axis.
+    try:
+        async with asyncio.timeout(_tool_deadline_seconds()):
+            # Use API client's hybrid extraction method
+            result = await api_client.extract_document_content_hybrid(
+                petition_id=petition_id,
+                document_identifier=document_identifier,
+                auto_optimize=auto_optimize,
+                progress_cb=_progress
+            )
+    except TimeoutError:
+        logger.warning(
+            "Content extraction exceeded the %ss tool deadline",
+            _tool_deadline_seconds(),
+        )
+        return format_error_response(
+            "Extraction exceeded the time budget for one call. Retry with "
+            "auto_optimize=False, or use FPD_get_document_download to fetch "
+            "the PDF directly.",
+            408,
+            authored=True,
+        )
 
     # Check for errors
     if "error" in result:
@@ -461,6 +517,10 @@ For document selection strategies and cost optimization, use FPD_get_guidance('c
             "note": _WARNING_NOTE,
         }
 
+    _window_extracted_content(
+        result, petition_id, document_identifier, char_offset, max_chars
+    )
+
     # Add LLM guidance for text analysis
     result["llm_guidance"] = {
         "analysis_strategies": {
@@ -483,7 +543,6 @@ For document selection strategies and cost optimization, use FPD_get_guidance('c
         },
         "extraction_quality": {
             "method": result.get("extraction_method", "Unknown"),
-            "cost": f"${result.get('processing_cost_usd', 0):.4f}",
             "optimization": result.get("auto_optimization", "Unknown")
         },
         "next_steps": [
@@ -503,5 +562,5 @@ def register(mcp) -> None:
     mcp.tool(name="FPD_get_document_download",
              app=AppConfig(resource_uri=DOWNLOADS_URI),
              annotations={"defer_loading": True, "readOnlyHint": True})(fpd_get_document_download)
-    mcp.tool(name="FPD_get_document_content_with_mistral_ocr",
+    mcp.tool(name="FPD_get_document_content_with_ocr",
              annotations={"defer_loading": True, "readOnlyHint": True})(fpd_get_document_content)

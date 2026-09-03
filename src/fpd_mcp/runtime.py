@@ -9,7 +9,6 @@ getters) to inject fakes.
 """
 
 import os
-from pathlib import Path
 
 from .api.fpd_client import FPDClient
 from .config.field_manager import FieldManager
@@ -50,14 +49,18 @@ def get_api_client() -> FPDClient:
     return api_client
 
 
-# Load field manager with graceful fallback
-config_path = Path(__file__).parent.parent.parent / "field_configs.yaml"
-try:
-    field_manager = FieldManager(config_path)
-except Exception as e:
-    logger.error(f"Config loading error: {e}. Application will use defaults.")
-    # The FieldManager already handles fallback internally, so this is extra protection
-    field_manager = FieldManager(config_path)  # This will use defaults
+# F-A7: this used to be a try/except whose handler called the identical
+# constructor with the identical argument, so if the constructor was what
+# raised it re-raised uncaught at import and the server did not start — while
+# the comment asserted the opposite. FieldManager.load_config already catches
+# everything and falls back to its in-code defaults, so the block was dead in
+# every case it claimed to cover. Fallback happens once, inside the class,
+# and says so in the log.
+# F-A6: the path was computed here AND independently in config/settings.py,
+# with a different number of .parent hops. One computation, one value.
+config_path = settings.field_config_path
+assert config_path is not None  # Settings.__init__ always resolves a default
+field_manager = FieldManager(config_path)
 
 
 fpd_service = None  # Deferred initialization via get_fpd_service(), matching get_api_client()'s idiom

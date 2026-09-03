@@ -1,5 +1,7 @@
 """Examiner Dispute Citation Analysis - Analyze citation patterns in dispute petitions"""
 
+from ._flags import flag
+
 
 async def examiner_dispute_citation_analysis_prompt(
     examiner_name: str = "",
@@ -22,13 +24,17 @@ async def examiner_dispute_citation_analysis_prompt(
     - date_range_end: Analysis end date (YYYY-MM-DD format)
     - include_comparison: Compare disputed vs non-disputed applications (true/false) [DEFAULT: true]
 
-    **IMPORTANT**: Citations API contains Office Action data from October 1, 2017 onwards. Applications filed from 2015-2016 typically have citation data available due to 1-2 year prosecution delays.
+    **IMPORTANT**: Both citation lanes are documented as covering Office Actions mailed October 1, 2017 to ~30 days prior; both have in practice been observed serving older records. Run BOTH citation lanes (Citations_search_citations_* enriched AND Citations_search_oa_citations_* raw 892/1449) and union the results - neither is a superset of the other.
 
     Returns examiner dispute analysis with citation pattern correlation and quality assessment.
 
-    Note: Enhanced Citations API covers Office Actions MAILED from Oct 1, 2017 to 30 days prior. Applications filed
-    from 2015-2016 onward typically have citation data available due to 1-2 year prosecution delays.
+    Note: both citation lanes are documented as covering Office Actions MAILED from Oct 1, 2017 to ~30 days prior.
+    Applications filed from 2015-2016 onward sit comfortably inside that window; older ones are still worth querying.
     """
+    # R-2: accept any encoding a caller sends (True, 'True', 'yes',
+    # '1'); the emitted template compares the normalized literal.
+    include_comparison = flag(include_comparison)
+
     return f"""Examiner Dispute Citation Analysis - Prosecution Quality Assessment
 
 Analysis Configuration:
@@ -58,7 +64,7 @@ applications = []
 
 try:
     if "{examiner_name}":
-        pfw_results = pfw_search_applications_minimal(
+        pfw_results = PFW_search_applications_minimal(
             examiner_name="{examiner_name}",
             filing_date_start="{date_range_start}",
             fields=['applicationNumberText', 'applicationMetaData.filingDate',
@@ -67,7 +73,7 @@ try:
         )
         print(f"**Analyzing Examiner:** {examiner_name}")
     elif "{art_unit}":
-        pfw_results = pfw_search_applications_minimal(
+        pfw_results = PFW_search_applications_minimal(
             art_unit="{art_unit}",
             filing_date_start="{date_range_start}",
             fields=['applicationNumberText', 'applicationMetaData.filingDate',
@@ -98,7 +104,7 @@ for app in applications:
     app_num = app.get('applicationNumberText')
 
     try:
-        petitions = fpd_search_petitions_by_application(
+        petitions = FPD_Search_petitions_by_application(
             application_number=app_num,
             include_documents=False
         )
@@ -108,7 +114,7 @@ for app in applications:
             petition_id = petition.get('petitionDecisionRecordIdentifier')
 
             try:
-                details = fpd_get_petition_details(petition_id=petition_id, include_documents=False)
+                details = FPD_Get_petition_details(petition_id=petition_id, include_documents=False)
                 rules = details.get('ruleBag', [])
 
                 # Check if it's an examiner dispute petition (37 CFR 1.181)
@@ -160,7 +166,7 @@ for app in dispute_analysis['disputed_apps'][:15]:  # Limit to 15
     app_num = app.get('applicationNumberText')
 
     try:
-        citations = search_citations_minimal(
+        citations = Citations_search_citations_minimal(
             application_number=app_num,
             rows=50
         )
@@ -183,7 +189,7 @@ if "{include_comparison}" == "true":
         app_num = app.get('applicationNumberText')
 
         try:
-            citations = search_citations_minimal(
+            citations = Citations_search_citations_minimal(
                 application_number=app_num,
                 rows=50
             )
@@ -285,7 +291,7 @@ else:
 - Limit petition analysis to prevent context explosion
 - Citation analysis limited to 15 disputed and 15 non-disputed applications
 - Date range must account for 1-2 year prosecution delay (use 2015-01-01 or later)
-- Enhanced Citations API covers Office Actions from Oct 1, 2017 onwards
+- Both citation lanes are documented as covering Office Actions from Oct 1, 2017 to ~30 days prior (older records observed in practice); query both and union
 - Three-MCP integration required: PFW (applications), FPD (disputes), Citations (patterns)
 - Graceful degradation if any MCP unavailable
 
@@ -294,7 +300,7 @@ else:
 **With PFW MCP:**
 ```python
 # Get examiner applications with targeted fields
-pfw_search_applications_minimal(
+PFW_search_applications_minimal(
     examiner_name="{examiner_name}",
     fields=['applicationNumberText', 'applicationMetaData.filingDate'],
     limit=50
@@ -305,7 +311,7 @@ pfw_search_applications_minimal(
 ```python
 # Find examiner dispute petitions
 for app in applications:
-    petitions = fpd_search_petitions_by_application(
+    petitions = FPD_Search_petitions_by_application(
         application_number=app_num,
         include_documents=False
     )
@@ -316,7 +322,7 @@ for app in applications:
 ```python
 # Analyze citation patterns
 try:
-    citations = search_citations_minimal(
+    citations = Citations_search_citations_minimal(
         application_number=app_num,
         rows=50
     )
@@ -334,7 +340,7 @@ CRITICAL: Start with PFW MCP to find examiner applications (FPD does not have ex
 1. Discover examiner applications (PFW MCP) using targeted fields:
 ```python
 # CRITICAL: Use fields parameter to search examiner applications efficiently
-pfw_search_applications_minimal(
+PFW_search_applications_minimal(
     examiner_name="{examiner_name}",
     fields=[
         'applicationNumberText',
@@ -349,7 +355,7 @@ pfw_search_applications_minimal(
 - Extract application numbers for petition lookup
 
 2. Find dispute petitions for these applications (FPD MCP):
-   - fpd_search_petitions_minimal for each application
+   - FPD_Search_petitions_minimal for each application
    - Filter for petition type: {petition_type}
    - Identify applications with examiner disputes
 
@@ -358,7 +364,7 @@ pfw_search_applications_minimal(
 Analyze citation patterns for disputed vs non-disputed applications:
 
 1. Get citations for DISPUTED applications:
-   - search_citations_minimal(application_number="...", rows=50)
+   - Citations_search_citations_minimal(application_number="...", rows=50)
    - Focus on examiner citation indicators
 
 2. Get citations for NON-DISPUTED applications (comparison baseline):
@@ -433,7 +439,7 @@ CROSS-MCP INTEGRATION:
 
 IMPORTANT WORKFLOW NOTES:
 1. MUST start with PFW (examiner name not available in FPD or Citations APIs)
-2. Citations data covers Office Actions MAILED from Oct 1, 2017 to 30 days prior
+2. Both citation lanes are documented as covering Office Actions MAILED from Oct 1, 2017 to ~30 days prior; Run BOTH citation lanes (Citations_search_citations_* enriched AND Citations_search_oa_citations_* raw 892/1449) and union the results - neither is a superset of the other.
 3. Applications filed 2015-2016+ typically have citation data due to 1-2 year prosecution delays
 4. Use ultra-context reduction (fields parameter) in PFW for 5x broader discovery
 5. Minimum 20 applications needed for statistical significance

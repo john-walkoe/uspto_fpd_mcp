@@ -1,5 +1,7 @@
 """Petition Document Research Package - Collect comprehensive petition documents"""
 
+from ._flags import flag
+
 
 async def petition_document_research_package_prompt(
     petition_identifier: str = "",
@@ -12,7 +14,7 @@ async def petition_document_research_package_prompt(
 
     Identifier fields (at least ONE required):
     - petition_identifier: Specific petition UUID for direct lookup
-    - application_number: Application number to find petition history (e.g., "17896175")
+    - application_number: Application number to find petition history (e.g., "17414168")
 
     Document options:
     - document_priority: Priority level (high, medium, all) [DEFAULT: high]
@@ -20,6 +22,10 @@ async def petition_document_research_package_prompt(
 
     Returns organized document package with download links and optional text extraction for detailed petition analysis.
     """
+    # R-2: accept any encoding a caller sends (True, 'True', 'yes',
+    # '1'); the emitted template compares the normalized literal.
+    extract_text = flag(extract_text, default=False)
+
     return f"""Petition Document Research Package - Comprehensive Case Analysis
 
 Inputs Provided:
@@ -45,7 +51,7 @@ petitions_to_process = []
 if "{petition_identifier}":
     # Direct petition lookup
     try:
-        petition_details = fpd_get_petition_details(
+        petition_details = FPD_Get_petition_details(
             petition_id="{petition_identifier}",
             include_documents=True
         )
@@ -57,7 +63,7 @@ if "{petition_identifier}":
 elif "{application_number}":
     # Search for all petitions related to application
     try:
-        app_petitions = fpd_search_petitions_by_application(
+        app_petitions = FPD_Search_petitions_by_application(
             application_number="{application_number}",
             include_documents=False
         )
@@ -68,7 +74,7 @@ elif "{application_number}":
         for petition in app_petitions.get('results', [])[:10]:
             petition_id = petition.get('petitionDecisionRecordIdentifier')
             try:
-                details = fpd_get_petition_details(
+                details = FPD_Get_petition_details(
                     petition_id=petition_id,
                     include_documents=True
                 )
@@ -152,7 +158,7 @@ download_links = []
 
 for doc in docs_to_include[:50]:  # Limit to 50 documents to prevent context explosion
     try:
-        download_url = fpd_get_document_download(document_uuid=doc['doc_uuid'])
+        download_url = FPD_get_document_download(document_uuid=doc['doc_uuid'])
 
         # Determine priority label
         if doc in document_categories['high_priority']:
@@ -179,7 +185,6 @@ if "{extract_text}" == "true":
     extraction_results = {{
         'successful': 0,
         'failed': 0,
-        'total_cost': 0.0,
         'extracted_documents': []
     }}
 
@@ -190,28 +195,23 @@ if "{extract_text}" == "true":
         try:
             print(f"\\n**Extracting:** {{doc['description']}}...")
 
-            content_result = fpd_get_document_content(
+            content_result = FPD_get_document_content_with_ocr(
                 document_uuid=doc['doc_uuid']
             )
 
             extracted_text = content_result.get('content', '')
             extraction_method = content_result.get('extraction_method', 'unknown')
-            cost = content_result.get('cost', 0.0)
 
             if extracted_text:
                 extraction_results['successful'] += 1
-                extraction_results['total_cost'] += cost
                 extraction_results['extracted_documents'].append({{
                     'description': doc['description'],
                     'method': extraction_method,
-                    'cost': cost,
                     'text_length': len(extracted_text),
                     'preview': extracted_text[:500]  # First 500 chars
                 }})
 
                 print(f"  ✅ Success ({{extraction_method}}) - {{len(extracted_text)}} chars")
-                if cost > 0:
-                    print(f"  💰 Cost: ${{cost:.4f}}")
 
             else:
                 extraction_results['failed'] += 1
@@ -224,8 +224,7 @@ if "{extract_text}" == "true":
     # Summary
     print(f"\\n### TEXT EXTRACTION SUMMARY\\n")
     print(f"- **Successful Extractions:** {{extraction_results['successful']}}")
-    print(f"- **Failed Extractions:** {{extraction_results['failed']}}")
-    print(f"- **Total Cost:** ${{extraction_results['total_cost']:.4f}}\\n")
+    print(f"- **Failed Extractions:** {{extraction_results['failed']}}\\n")
 
     # Show previews of extracted content
     if extraction_results['extracted_documents']:
@@ -258,22 +257,22 @@ if "{application_number}":
 - Limit petition processing to 10 petitions maximum when searching by application_number
 - Document download link generation limited to 50 documents to prevent context explosion
 - Text extraction limited to 10 high-priority documents maximum
-- Text extraction has costs for OCR processing - use sparingly for scanned documents
+- OCR of scanned documents is slower - extract selectively
 - Use document_priority='high' for focused analysis to minimize context usage
-- Always check extraction costs before processing large document sets
+- Extracted text is large - scope extraction before processing large document sets
 
 ## DOCUMENT COLLECTION STRATEGY
 
 ### Step 1: Petition Identification
 
 If petition_identifier provided:
-- Use `fpd_get_petition_details(petition_id="{petition_identifier}", include_documents=True)`
+- Use `FPD_Get_petition_details(petition_id="{petition_identifier}", include_documents=True)`
 - Direct access to specific petition and all associated documents
 
 If application_number provided:
-- Use `fpd_search_petitions_by_application(application_number="{application_number}", include_documents=False)`
+- Use `FPD_Search_petitions_by_application(application_number="{application_number}", include_documents=False)`
 - Find all petitions for the application
-- Then use `fpd_get_petition_details` for each petition of interest
+- Then use `FPD_Get_petition_details` for each petition of interest
 
 ### Step 2: Document Prioritization
 
@@ -296,18 +295,17 @@ If application_number provided:
 
 ### Step 3: Document Access and Organization
 
-For each selected document, use `fpd_get_document_download` to generate:
+For each selected document, use `FPD_get_document_download` to generate:
 - Browser-accessible download URLs
 - Enhanced filename format: `PET-[date]_APP-[app_number]_[doc_type]_[filename].pdf`
 - Chronological organization by petition filing date
 
 ## TEXT EXTRACTION WORKFLOW (if extract_text=true)
 
-For high-priority documents, use `fpd_get_document_content`:
-- Intelligent hybrid extraction: PyPDF2 first (free), Mistral OCR fallback (paid)
-- Cost optimization: Only pay for OCR when needed
+For high-priority documents, use `FPD_get_document_content_with_ocr`:
+- Intelligent hybrid extraction: pypdf first (fast), Mistral OCR fallback (scanned documents)
 - Quality detection: Automatic method selection
-- Transparent reporting: Shows extraction method and costs
+- Transparent reporting: Shows which extraction method was used
 
 ### Legal Content Analysis Framework:
 
@@ -361,23 +359,21 @@ Integration Opportunities:
 - PTAB vulnerability assessment links
 - Portfolio strategy implications
 
-Cost and Efficiency Metrics:
-- Document extraction costs (if OCR used)
+Efficiency Metrics:
+- Extraction method used per document
 - Processing time and resource requirements
 - Recommended workflow optimizations
 
-## DOCUMENT EXTRACTION COST ESTIMATE
+## DOCUMENT EXTRACTION EXPECTATIONS
 
-Free Text-Based PDFs:
-- PyPDF2 extraction: $0.00 per document
-- Instant processing
+Text-Based PDFs:
+- pypdf extraction: instant processing
 
 Scanned Documents (OCR Required):
-- Mistral OCR: ~$0.001 per page
-- Quality assured text extraction
-- Automatic fallback when PyPDF2 fails
+- OCR: slower per page, quality-assured verbatim text
+- Automatic fallback when pypdf fails
 
-** SMART COST MANAGEMENT**: The system automatically tries free extraction first and only uses paid OCR when necessary, optimizing costs while ensuring complete text access."""
+** SMART EXTRACTION**: The system automatically tries fast direct text extraction first and only uses OCR when necessary, ensuring complete text access with the least processing time."""
 
 
 # =============================================================================

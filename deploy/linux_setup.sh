@@ -259,7 +259,7 @@ if [[ "$HAS_PFW_MCP" =~ ^[Yy]$ ]]; then
 else
     log_info "FPD will run in standalone mode with local proxy (always-on)"
     log_info "Install USPTO PFW MCP later for enhanced features:"
-    echo -e "${CYAN}       https://github.com/johnwalkoe/patent_filewrapper_mcp${NC}"
+    echo -e "${CYAN}       https://github.com/john-walkoe/uspto_pfw_mcp${NC}"
     USE_CENTRALIZED_PROXY=false
 fi
 
@@ -456,7 +456,7 @@ echo "  uv run fpd-mcp --help"
 
 echo ""
 log_info "Test with Claude Code:"
-echo "  Ask Claude: 'Use fpd_search_petitions_minimal to search for petitions'"
+echo "  Ask Claude: 'Use FPD_Search_petitions_minimal to search for petitions'"
 echo "  Ask Claude: 'Use fpd_get_tool_reflections to learn about FPD MCP features'"
 
 echo ""

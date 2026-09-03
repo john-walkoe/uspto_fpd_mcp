@@ -21,6 +21,20 @@ class CircuitState(Enum):
     HALF_OPEN = "half_open"  # Testing state, limited requests allowed
 
 
+class CircuitBreakerOpenError(Exception):
+    """Raised when a call is rejected because the circuit is OPEN.
+
+    Typed so callers can branch on it directly instead of string-matching the
+    exception message, which could not tell an open circuit apart from an
+    upstream failure travelling through the breaker.
+    """
+
+    def __init__(self, name: str, reason: str = "OPEN - service unavailable"):
+        self.name = name
+        self.reason = reason
+        super().__init__(f"Circuit breaker '{name}' is {reason}")
+
+
 class CircuitBreaker:
     """
     Circuit breaker for preventing cascading failures
@@ -53,6 +67,12 @@ class CircuitBreaker:
         self.last_failure_time: Optional[float] = None
         self.state = CircuitState.CLOSED
         self._lock = asyncio.Lock()
+        # F-R5: admit exactly one probe while HALF_OPEN. The comment below
+        # said "limit the number of test requests" but nothing limited
+        # anything: the lock is released before `await func(...)`, so every
+        # caller waiting on a recovering upstream proceeded at once — the
+        # thundering herd the half-open state exists to prevent.
+        self._probe = asyncio.Semaphore(1)
 
         logger.info(f"Circuit breaker '{name}' initialized: threshold={failure_threshold}, timeout={recovery_timeout}s")
 
@@ -78,15 +98,30 @@ class CircuitBreaker:
                     logger.info(f"Circuit breaker '{self.name}' transitioning to HALF_OPEN for testing")
                     self.state = CircuitState.HALF_OPEN
                 else:
-                    raise Exception(f"Circuit breaker '{self.name}' is OPEN - service unavailable")
+                    raise CircuitBreakerOpenError(self.name)
 
             # In half-open state, limit the number of test requests
             if self.state == CircuitState.HALF_OPEN:
                 if self.success_count >= 3:  # After 3 successes, close circuit
                     logger.info(f"Circuit breaker '{self.name}' closing after successful recovery")
                     self._close_circuit()
+            probing = self.state == CircuitState.HALF_OPEN
 
-        # Execute the function call
+        # F-R5: one probe at a time while half-open. A second caller arriving
+        # during the probe fails fast rather than piling onto an upstream that
+        # has not been shown to be healthy yet.
+        if probing:
+            if self._probe.locked():
+                raise CircuitBreakerOpenError(
+                    self.name, "HALF_OPEN - a recovery probe is already in flight"
+                )
+            async with self._probe:
+                return await self._invoke(func, *args, **kwargs)
+
+        return await self._invoke(func, *args, **kwargs)
+
+    async def _invoke(self, func: Callable, *args, **kwargs) -> Any:
+        """Run the wrapped call and record its outcome."""
         try:
             result = await func(*args, **kwargs)
             await self._on_success()

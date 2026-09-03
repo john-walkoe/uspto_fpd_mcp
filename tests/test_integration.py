@@ -23,6 +23,11 @@ requires_live_api = pytest.mark.skipif(
     reason="USPTO_API_KEY not set - skipping live API integration test",
 )
 
+# T-7: deselected by default via addopts (-m 'not live'). The USPTO_API_KEY
+# gate above is not enough on its own — the key is normally exported on a
+# developer machine, so these fired on every plain `pytest` run.
+pytestmark = pytest.mark.live
+
 
 @requires_live_api
 async def test_search_petitions_minimal():
@@ -37,7 +42,10 @@ async def test_search_petitions_minimal():
     )
 
     assert "error" not in result, f"API returned error: {result.get('error')}"
-    assert "results" in result
+    # The FPD search response carries petitionDecisionDataBag + count; it has
+    # never had a "results" key, so this assertion could not pass.
+    assert "petitionDecisionDataBag" in result
+    assert isinstance(result.get("count"), int)
 
 
 @requires_live_api
@@ -53,7 +61,8 @@ async def test_search_by_art_unit():
     )
 
     assert "error" not in result, f"API returned error: {result.get('error')}"
-    assert "recordTotalQuantity" in result
+    assert "petitionDecisionDataBag" in result
+    assert isinstance(result.get("count"), int)
 
 
 @requires_live_api
@@ -72,4 +81,4 @@ async def test_api_authentication():
         assert "429" in str(result), f"Authentication failed: {result['error']}"
         pytest.skip("Rate limit exceeded - try again later")
 
-    assert "results" in result
+    assert "petitionDecisionDataBag" in result

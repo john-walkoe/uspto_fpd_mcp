@@ -1,5 +1,7 @@
 """Petition Quality with Citation Intelligence - Enhanced with citation data from Enhanced Citations MCP"""
 
+from ._flags import flag
+
 
 async def petition_quality_with_citation_intelligence_prompt(
     art_unit: str = "",
@@ -20,13 +22,17 @@ async def petition_quality_with_citation_intelligence_prompt(
     - include_citation_analysis: Include Enhanced Citations analysis (true/false) [DEFAULT: true]
     - analysis_depth: Analysis thoroughness (basic, standard, comprehensive) [DEFAULT: comprehensive]
 
-    **IMPORTANT**: Citations API contains Office Action data from October 1, 2017 onwards. Applications filed from 2015-2016 typically have citation data available due to 1-2 year prosecution delays.
+    **IMPORTANT**: Both citation lanes are documented as covering Office Actions mailed October 1, 2017 to ~30 days prior; both have in practice been observed serving older records. Run BOTH citation lanes (Citations_search_citations_* enriched AND Citations_search_oa_citations_* raw 892/1449) and union the results - neither is a superset of the other.
 
     Returns art unit quality assessment with petition-citation correlation analysis and examiner citation quality metrics.
 
-    Note: Enhanced Citations API covers Office Actions MAILED from Oct 1, 2017 to 30 days prior. Applications filed
-    from 2015-2016 onward typically have citation data available due to 1-2 year prosecution delays.
+    Note: both citation lanes are documented as covering Office Actions MAILED from Oct 1, 2017 to ~30 days prior.
+    Applications filed from 2015-2016 onward sit comfortably inside that window; older ones are still worth querying.
     """
+    # R-2: accept any encoding a caller sends (True, 'True', 'yes',
+    # '1'); the emitted template compares the normalized literal.
+    include_citation_analysis = flag(include_citation_analysis)
+
     return f"""Art Unit Quality Assessment with Citation Intelligence
 
 Analysis Configuration:
@@ -58,7 +64,7 @@ petition_data = {{
 }}
 
 try:
-    petitions = fpd_search_petitions_by_art_unit(
+    petitions = FPD_Search_petitions_by_art_unit(
         art_unit="{art_unit}",
         date_range="{date_range_start}:{date_range_end or '2025-12-31'}",
         limit=100
@@ -71,7 +77,7 @@ try:
         decision = petition.get('decisionTypeCodeDescriptionText', '')
 
         try:
-            details = fpd_get_petition_details(petition_id=petition_id, include_documents=False)
+            details = FPD_Get_petition_details(petition_id=petition_id, include_documents=False)
             rules = details.get('ruleBag', [])
 
             if any('1.181' in rule for rule in rules):
@@ -98,7 +104,7 @@ print("**PHASE 2: Collecting Application Data (PFW)...**\\n")
 applications = []
 
 try:
-    pfw_results = pfw_search_applications_minimal(
+    pfw_results = PFW_search_applications_minimal(
         art_unit="{art_unit}",
         filing_date_start="{date_range_start}",
         fields=['applicationNumberText', 'applicationMetaData.examinerNameText',
@@ -131,7 +137,7 @@ if "{include_citation_analysis}" == "true" and applications:
         app_num = app.get('applicationNumberText')
 
         try:
-            citations = search_citations_minimal(
+            citations = Citations_search_citations_minimal(
                 application_number=app_num,
                 rows=50
             )
@@ -236,7 +242,7 @@ else:
 - Limit PFW application search to 50 results
 - Citation analysis limited to 20 applications to prevent context explosion
 - Date range must account for 1-2 year prosecution delay (use 2015-01-01 or later)
-- Enhanced Citations API covers Office Actions from Oct 1, 2017 onwards
+- Both citation lanes are documented as covering Office Actions from Oct 1, 2017 to ~30 days prior (older records observed in practice); query both and union
 - Three-MCP integration requires PFW, FPD, and Enhanced Citations MCPs
 - Graceful degradation if any MCP unavailable
 
@@ -245,7 +251,7 @@ else:
 Use FPD tools to identify petition patterns:
 
 1. Search art unit petitions:
-   - fpd_search_petitions_minimal for initial discovery
+   - FPD_Search_petitions_minimal for initial discovery
    - Focus on petition types: 37 CFR 1.181 (examiner disputes), 37 CFR 1.137 (revivals)
 
 2. Identify red flags:
@@ -257,11 +263,11 @@ Use FPD tools to identify petition patterns:
 
 CRITICAL WORKFLOW: Enhanced Citations API does NOT have examiner name field - must use PFW first.
 
-CITATION DATA AVAILABILITY: Enhanced Citations API covers Office Actions MAILED from Oct 1, 2017 to 30 days prior.
-Applications filed from 2015-2016 onward typically have citation data due to 1-2 year prosecution delays.
+CITATION DATA AVAILABILITY: both lanes are documented as covering Office Actions MAILED from Oct 1, 2017 to ~30 days
+prior; both have been observed serving older records. Run BOTH citation lanes (Citations_search_citations_* enriched AND Citations_search_oa_citations_* raw 892/1449) and union the results - neither is a superset of the other.
 
 1. Get art unit applications from PFW:
-   - pfw_search_applications_minimal(art_unit="{art_unit}", filing_date_start="{date_range_start}", limit=100)
+   - PFW_search_applications_minimal(art_unit="{art_unit}", filing_date_start="{date_range_start}", limit=100)
    - Use fields parameter for targeted data retrieval:
      fields=['applicationNumberText', 'applicationMetaData.examinerNameText', 'applicationMetaData.filingDate']
 
@@ -272,7 +278,7 @@ Applications filed from 2015-2016 onward typically have citation data due to 1-2
 Use Enhanced Citations MCP to assess citation quality:
 
 1. Search citations for art unit applications:
-   - search_citations_minimal(application_number="...", rows=50)
+   - Citations_search_citations_minimal(application_number="...", rows=50)
    - Aggregate across 20-50 applications for pattern analysis
 
 2. Analyze citation metrics:
@@ -325,8 +331,10 @@ CROSS-MCP INTEGRATION NOTES:
 - Correlation analysis requires all three MCPs for complete assessment
 
 CITATION API LIMITATIONS:
-- Data covers Office Actions MAILED from Oct 1, 2017 to 30 days prior (not filing date)
-- Applications filed 2015-2016+ typically have citation data due to 1-2 year prosecution delays
+- Documented window on BOTH lanes: Office Actions MAILED from Oct 1, 2017 to ~30 days prior (not filing date);
+  older records observed in practice, so do not screen an application out on date alone
+- Neither lane is a superset of the other - query both and union; officeActionDate/publicationNumber 400 on the
+  OA lane, legalSectionCode/examinerNameText 400 on the enriched lane
 - Examiner name NOT in Citations API - requires PFW workflow
 - Decision codes NOT available - use prosecution outcome from PFW"""
 

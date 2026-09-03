@@ -1,5 +1,7 @@
 """Litigation Research Setup - Prosecution + petition history requiring PFW MCP"""
 
+from ._flags import flag
+
 
 async def litigation_research_setup_prompt(
     patent_number: str = "",
@@ -13,8 +15,10 @@ async def litigation_research_setup_prompt(
     WARNING: DEPENDENCIES: Requires Patent File Wrapper (PFW) MCP
 
     Identifier fields (at least ONE required):
-    - patent_number: US patent number (e.g., "11788453", "11,788,453")
-    - application_number: Application number (e.g., "17896175", "17/896,175")
+    - patent_number: US patent number as granted, digits only (e.g., "12252554")
+    - application_number: Application number, e.g. "17414168" (FPD takes digits
+      only; the slash-comma form "17/414,168" is the one PFW resolves
+      unambiguously as an application)
 
     Research options:
     - include_prosecution: Include detailed prosecution history (true/false) [DEFAULT: true]
@@ -22,6 +26,10 @@ async def litigation_research_setup_prompt(
 
     Returns comprehensive litigation research package with prosecution context and petition red flag analysis.
     """
+    # R-2: accept any encoding a caller sends (True, 'True', 'yes',
+    # '1'); the emitted template compares the normalized literal.
+    include_prosecution = flag(include_prosecution)
+
     return f"""Litigation Research Setup - Prosecution + Petition Analysis
 
 Inputs Provided:
@@ -59,7 +67,7 @@ try:
 
     if "{patent_number}":
         # Lookup by patent number using PFW MCP
-        pfw_result = pfw_search_applications_minimal(
+        pfw_result = PFW_search_applications_minimal(
             patent_number="{patent_number}",
             fields=['applicationNumberText', 'patentNumber', 'inventionTitle',
                     'applicationStatusDescription', 'applicationMetaData.firstApplicantName',
@@ -79,7 +87,7 @@ try:
 
     elif "{application_number}":
         # Lookup by application number
-        pfw_result = pfw_search_applications_minimal(
+        pfw_result = PFW_search_applications_minimal(
             application_number="{application_number}",
             fields=['applicationNumberText', 'patentNumber', 'inventionTitle',
                     'applicationStatusDescription', 'applicationMetaData.firstApplicantName',
@@ -107,7 +115,7 @@ if litigation_data['application_number']:
     print("**PHASE 2: Analyzing Petition History...**\\n")
 
     try:
-        petitions = fpd_search_petitions_by_application(
+        petitions = FPD_Search_petitions_by_application(
             application_number=litigation_data['application_number'],
             include_documents=False
         )
@@ -123,7 +131,7 @@ if litigation_data['application_number']:
 
             # Get petition details
             try:
-                details = fpd_get_petition_details(petition_id=petition_id, include_documents=False)
+                details = FPD_Get_petition_details(petition_id=petition_id, include_documents=False)
                 rules = details.get('ruleBag', [])
 
                 petition_info = {{
@@ -186,7 +194,7 @@ if litigation_data['petition_history']:
     # Collect documents from petitions based on priority setting
     for petition in litigation_data['petition_history']:
         try:
-            details = fpd_get_petition_details(
+            details = FPD_Get_petition_details(
                 petition_id=petition['petition_id'],
                 include_documents=True
             )
@@ -296,7 +304,7 @@ if "{include_prosecution}" == "true":
 - Requires PFW MCP for patent/application lookup - workflow will fail if unavailable
 - Limit petition document collection to 20-30 documents to prevent context explosion
 - Use priority_documents='litigation' to focus on most relevant documents
-- Text extraction from petition documents has costs - use sparingly
+- Text extraction output is large and OCR is slow for scanned documents - extract selectively
 - For comprehensive prosecution analysis, use PFW MCP's full file history tools separately
 - Red flag analysis is qualitative - requires attorney judgment for litigation strategy
 
@@ -306,7 +314,7 @@ Step 1: Process flexible identifier inputs using targeted fields:
 ```python
 if patent_number:
     # Use PFW MCP with fields parameter for targeted retrieval
-    patent_info = pfw_search_applications_minimal(
+    patent_info = PFW_search_applications_minimal(
         query='patentNumber:"{{patent_number}}"',
         fields=['applicationNumberText', 'patentNumber', 'inventionTitle', 'applicationMetaData.firstApplicantName'],
         limit=1
@@ -315,7 +323,7 @@ if patent_number:
 
 elif application_number:
     # Direct application lookup with PFW MCP using targeted fields
-    application_info = pfw_search_applications_minimal(
+    application_info = PFW_search_applications_minimal(
         query='applicationNumberText:"{application_number}"',
         fields=['applicationNumberText', 'inventionTitle', 'applicationMetaData.firstApplicantName'],
         limit=1
@@ -336,7 +344,7 @@ Step 2: Validate target and set research scope:
 
 Step 3: Get comprehensive prosecution package (if include_prosecution=true):
 ```
-pfw_get_application_details(
+PFW_get_application_details(
     application_number="{application_number}",
     include_documents=true
 )
@@ -362,7 +370,7 @@ Document Prioritization for Litigation:
 
 Step 4: Comprehensive petition history review:
 ```
-fpd_search_petitions_by_application(
+FPD_Search_petitions_by_application(
     application_number="{application_number}",
     include_documents=True
 )
@@ -403,7 +411,7 @@ High-priority petition documents (FPD MCP):
 Step 6: Document extraction and text analysis:
 For critical documents:
 ```
-fpd_get_document_content(
+FPD_get_document_content_with_ocr(
     petition_id=petition_id,
     document_identifier=document_id
 )
@@ -469,8 +477,8 @@ Strategic Litigation Intelligence:
 - Potential challenges and defensive strategies
 - Cross-reference opportunities with related patents
 
-Cost-Optimized Research Plan:
-- Document extraction priorities with cost estimates
+Focused Research Plan:
+- Document extraction priorities for the key documents
 - Text analysis recommendations for key documents
 - Workflow optimization for litigation timeline
 - Resource allocation guidance for legal team

@@ -19,6 +19,19 @@ COPY field_configs.yaml ./
 COPY scripts/ ./scripts/
 RUN uv sync --frozen --no-dev
 
+# M-15: run as a non-root uid. The container mounts the shared auth DB and
+# writes the Fernet link key and the link cache into that bind mount, so root
+# here is a blast-radius multiplier over cross-server credentials rather than
+# a hygiene item. uid 1000 matches the host owner of the shared data dir;
+# override with --build-arg APP_UID=... if yours differs.
+ARG APP_UID=1000
+ARG APP_GID=1000
+RUN groupadd --gid "${APP_GID}" app \
+    && useradd --uid "${APP_UID}" --gid "${APP_GID}" --create-home app \
+    && mkdir -p /app/data \
+    && chown -R "${APP_UID}:${APP_GID}" /app
+USER app
+
 ENV FASTMCP_TRANSPORT=http
 ENV FASTMCP_HOST=0.0.0.0
 ENV FASTMCP_PORT=8005

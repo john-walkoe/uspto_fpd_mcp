@@ -190,8 +190,12 @@ async def test_fallback_degrades_when_wrapper_fetch_also_fails(monkeypatch):
     result = await client.get_petition_by_id(_PETITION_ID, include_documents=True)
 
     assert "error" not in result
-    assert "document_metadata_source" not in result
     assert "documentBag" not in result["petitionDecisionDataBag"][0]
+    # The degraded path is now MARKED: an absent documentBag must never be
+    # mistaken for "this petition has no documents".
+    assert result["document_metadata_available"] is False
+    assert result["document_metadata_source"] == "unavailable"
+    assert "could NOT be retrieved" in result["document_metadata_note"]
 
 
 async def test_fallback_propagates_error_when_without_docs_also_fails(monkeypatch):
@@ -255,7 +259,72 @@ def test_resolve_document_metadata_unmatched_identifier_still_errors():
 
 
 # --------------------------------------------------------------------- #
-# Tool-level: Get_petition_details surfaces the fallback-produced shape
+# F-X3: an empty bag on a petition marked document_metadata_available=False
+# is "we could not look", not "the document is absent"
+# --------------------------------------------------------------------- #
+
+def test_download_reports_unavailable_metadata_as_503_not_404():
+    petition_result = FPDClient._mark_document_metadata_unavailable(
+        copy.deepcopy(_without_docs_result()),
+        "the application file-wrapper documents endpoint also failed",
+    )
+
+    resolved = _resolve_document_metadata(petition_result, _PETITION_ID, _DOC_ID)
+
+    assert resolved["status_code"] == 503
+    assert "not found" not in resolved["error"].lower()
+    assert "temporarily unavailable" in resolved["error"]
+
+
+def _extraction_service(client):
+    import httpx
+
+    from fpd_mcp.services.document_extraction import DocumentExtractionService
+
+    return DocumentExtractionService(
+        client=client, download_timeout=5.0, connection_limits=httpx.Limits()
+    )
+
+
+async def test_extraction_reports_unavailable_metadata_as_503_not_404(monkeypatch):
+    petition_result = FPDClient._mark_document_metadata_unavailable(
+        copy.deepcopy(_without_docs_result()),
+        "the application file-wrapper documents endpoint also failed",
+    )
+
+    class _Client:
+        async def get_petition_by_id(self, petition_id, include_documents=True):
+            return petition_result
+
+    service = _extraction_service(_Client())
+    resolved = await service._resolve_document_for_hybrid_extraction(
+        _PETITION_ID, _DOC_ID, "req-1"
+    )
+
+    assert resolved["status_code"] == 503
+    assert "not found" not in resolved["error"].lower()
+
+
+async def test_extraction_still_404s_when_the_bag_was_actually_retrieved():
+    petition_result = copy.deepcopy(_without_docs_result())
+    petition_result["petitionDecisionDataBag"][0]["documentBag"] = (
+        _wrapper_result()["documentBag"]
+    )
+
+    class _Client:
+        async def get_petition_by_id(self, petition_id, include_documents=True):
+            return petition_result
+
+    service = _extraction_service(_Client())
+    resolved = await service._resolve_document_for_hybrid_extraction(
+        _PETITION_ID, "NOT-A-REAL-DOC-ID", "req-2"
+    )
+
+    assert resolved["status_code"] == 404
+
+
+# --------------------------------------------------------------------- #
+# Tool-level: FPD_Get_petition_details surfaces the fallback-produced shape
 # unchanged (existing keys preserved, additive keys pass through)
 # --------------------------------------------------------------------- #
 

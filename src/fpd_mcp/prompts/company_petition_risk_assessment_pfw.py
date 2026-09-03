@@ -1,5 +1,7 @@
 """Company Petition Risk Assessment - Due diligence and risk assessment requiring PFW MCP"""
 
+from ._flags import flag
+
 
 async def company_petition_risk_assessment_prompt(
     company_name: str = "",
@@ -16,8 +18,11 @@ async def company_petition_risk_assessment_prompt(
 
     Identifier fields (at least ONE required):
     - company_name: Company/applicant name (e.g., "TechCorp Inc", "Apple Inc")
-    - application_number: Application number (e.g., "17896175", "17/896,175") - PFW will identify the assignee/applicant entity
-    - patent_number: Patent number (e.g., "11234567", "11,234,567") - PFW will identify the assignee and related applications
+    - application_number: Application number, e.g. "17414168" (FPD takes digits
+      only; the slash-comma form "17/414,168" is the one PFW resolves
+      unambiguously as an application) - PFW will identify the assignee/applicant entity
+    - patent_number: Patent number as granted, digits only (e.g., "12252554").
+      PFW will identify the assignee and related applications
 
     Analysis options:
     - date_range_start: Analysis start date (YYYY-MM-DD format, e.g., "2020-01-01")
@@ -30,6 +35,10 @@ async def company_petition_risk_assessment_prompt(
 
     Returns comprehensive risk assessment with red flag identification and cross-MCP integration guidance.
     """
+    # R-2: accept any encoding a caller sends (True, 'True', 'yes',
+    # '1'); the emitted template compares the normalized literal.
+    include_details = flag(include_details)
+
     return f"""# Company Petition Risk Assessment - Due Diligence Workflow
 
 **Inputs Provided:**
@@ -60,14 +69,14 @@ When using PFW tools for entity identification, ALWAYS use the fields parameter 
 
 ```python
 # For application_number lookup:
-pfw_search_applications_minimal(
+PFW_search_applications_minimal(
     query=f'applicationNumberText:{application_number}',
     fields=['applicationNumberText', 'applicationMetaData.firstApplicantName'],
     limit=1
 )
 
 # For patent_number lookup:
-pfw_search_applications_minimal(
+PFW_search_applications_minimal(
     query=f'patentNumber:{patent_number}',
     fields=['applicationNumberText', 'patentNumber', 'applicationMetaData.firstApplicantName'],
     limit=1
@@ -93,7 +102,7 @@ if "{application_number}" or "{patent_number}":
         identifier = "{application_number}" or "{patent_number}"
         field_type = "applicationNumberText" if "{application_number}" else "patentNumber"
 
-        pfw_result = pfw_search_applications_minimal(
+        pfw_result = PFW_search_applications_minimal(
             query=f'{{field_type}}:{{identifier}}',
             fields=['applicationNumberText', 'applicationMetaData.firstApplicantName'],
             limit=1
@@ -110,7 +119,7 @@ date_filter = ""
 if "{date_range_start}" and "{date_range_end}":
     date_filter = f"petition_date_start='{{date_range_start}}', petition_date_end='{{date_range_end}}'"
 
-petitions = fpd_search_petitions_minimal(
+petitions = FPD_Search_petitions_minimal(
     applicant_name=company_entity,
     limit=100
 )
@@ -140,7 +149,7 @@ for petition in petitions.get('results', []):
     # Get detailed petition info if requested
     if "{include_details}" == "true":
         try:
-            details = fpd_get_petition_details(petition_id=petition_id, include_documents=False)
+            details = FPD_Get_petition_details(petition_id=petition_id, include_documents=False)
             rules = details.get('ruleBag', [])
 
             # Check for specific CFR rules
@@ -214,7 +223,7 @@ risk_level = "LOW" if risk_score < 20 else "MEDIUM" if risk_score < 50 else "HIG
 print(f"\\n### OVERALL RISK SCORE: {{risk_score}} ({{risk_level}})")
 print("\\n**Next Steps:**")
 if risk_score > 20:
-    print("1. Review high-risk petitions in detail using fpd_get_petition_details")
+    print("1. Review high-risk petitions in detail using FPD_Get_petition_details")
     print("2. Use PFW to analyze prosecution history for patterns")
     print("3. Check PTAB for any post-grant challenges on granted patents")
 else:
@@ -237,7 +246,7 @@ else:
 # For each high-risk application, get prosecution context
 for flag in red_flags['high_risk']:
     try:
-        pfw_context = pfw_search_applications_minimal(
+        pfw_context = PFW_search_applications_minimal(
             query=f"applicationNumberText:{{flag['app_num']}}",
             fields=['applicationNumberText', 'applicationStatusDescription',
                     'applicationMetaData.examinerNameText', 'groupArtUnitNumber'],
@@ -255,7 +264,7 @@ for petition in petitions.get('results', []):
     patent_num = petition.get('patentNumber')
     if patent_num:
         try:
-            ptab_challenges = search_trials_minimal(patent_number=patent_num)
+            ptab_challenges = PTAB_search_trials_minimal(patent_number=patent_num)
             if ptab_challenges:
                 print(f"⚠️ PTAB ALERT: Patent {{patent_num}} has challenges")
         except:

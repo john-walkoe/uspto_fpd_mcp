@@ -314,7 +314,7 @@ class TestMinimalQueryBuilding:
                 allow_balanced_params=False,
             )
         assert "art_unit" in str(exc_info.value)
-        assert "fpd_search_petitions_balanced" in str(exc_info.value)
+        assert "FPD_Search_petitions_balanced" in str(exc_info.value)
 
 
 # =============================================================================
@@ -375,7 +375,7 @@ class TestBalancedQueryBuilding:
         with pytest.raises(ValidationError) as exc_info:
             _build_convenience_query(allow_balanced_params=False, **{kwarg: value})
         assert kwarg in str(exc_info.value)
-        assert "fpd_search_petitions_balanced" in str(exc_info.value)
+        assert "FPD_Search_petitions_balanced" in str(exc_info.value)
 
 
 # =============================================================================
@@ -446,4 +446,4 @@ class TestRejectBalancedOnlyParamsHelper:
         with pytest.raises(ValidationError) as exc_info:
             _reject_balanced_only_params("551", None, None, None, None)
         assert "petition_type_code" in str(exc_info.value)
-        assert "fpd_search_petitions_balanced" in str(exc_info.value)
+        assert "FPD_Search_petitions_balanced" in str(exc_info.value)

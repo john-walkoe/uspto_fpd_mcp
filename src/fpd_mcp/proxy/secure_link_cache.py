@@ -43,6 +43,51 @@ _DB_FILE_NAME = "fpd_proxy_link_cache.db"
 # defense-in-depth against other DPAPI-capable processes.
 _DPAPI_ENTROPY = hashlib.sha256(b"fpd_mcp.proxy.secure_link_cache.v1").digest()
 
+_PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+
+
+def _default_data_dir() -> Path:
+    """Writable home for the link-cache db and encryption key.
+
+    Priority: FPD_LINK_CACHE_DIR env override → alongside the OAuth user DB
+    (FPD_AUTH_DB_PATH's directory — the mounted, uid-aligned data dir in the
+    Docker deployments) → project root (bare stdio installs). Each candidate
+    is write-probed; the last resort is the system temp dir, so an
+    unwritable install degrades to session-lived links instead of a 500 on
+    every download (h3 staging 2026-08-16: /app is root-owned under the
+    uid-1000 runtime and SecureLinkCache() died on the sqlite connect,
+    failing FPD_get_document_download outright).
+    """
+    candidates: list[Path] = []
+    env_dir = os.getenv("FPD_LINK_CACHE_DIR")
+    if env_dir:
+        candidates.append(Path(env_dir))
+    auth_db = os.getenv("FPD_AUTH_DB_PATH")
+    if auth_db:
+        candidates.append(Path(auth_db).parent)
+    candidates.append(_PROJECT_ROOT)
+    for cand in candidates:
+        try:
+            cand.mkdir(parents=True, exist_ok=True)
+            probe = cand / ".fpd_link_cache_write_probe"
+            probe.touch()
+            probe.unlink()
+            return cand
+        except OSError:
+            continue
+    import tempfile
+    return Path(tempfile.gettempdir())
+
+
+class LinkCacheUnavailable(Exception):
+    """The persistent-link store could not be read.
+
+    F-X1: distinct from "no such link". Both used to surface as None, so a
+    corrupt or unreadable database was reported to the user as an expired
+    link, and the remedy that message suggests (generate a new link) produces
+    another link that also fails.
+    """
+
 
 class SecureLinkCache:
     """
@@ -62,9 +107,7 @@ class SecureLinkCache:
         if db_path:
             self.db_path = db_path
         else:
-            # Absolute path in project root for a consistent location
-            project_root = Path(__file__).parent.parent.parent.parent
-            self.db_path = str(project_root / _DB_FILE_NAME)
+            self.db_path = str(_default_data_dir() / _DB_FILE_NAME)
 
         self.encryption_key = self._get_or_create_encryption_key()
         self.cipher = Fernet(self.encryption_key)
@@ -78,8 +121,14 @@ class SecureLinkCache:
         per-machine). On non-Windows the raw key is stored with restrictive
         file permissions (0o600).
         """
-        project_root = Path(__file__).parent.parent.parent.parent
-        key_file = project_root / _KEY_FILE_NAME
+        # Prefer a legacy project-root key when one already exists (pre-2026-08
+        # installs stored it there; moving away from it would orphan every
+        # previously issued persistent link), else live beside the db.
+        legacy_key = _PROJECT_ROOT / _KEY_FILE_NAME
+        if legacy_key.exists():
+            key_file = legacy_key
+        else:
+            key_file = _default_data_dir() / _KEY_FILE_NAME
 
         try:
             from ..shared.dpapi_crypto import (
@@ -224,6 +273,11 @@ class SecureLinkCache:
         Returns:
             Dict with petition_id, document_identifier, file_download_uri,
             enhanced_filename and access metadata, or None if invalid/expired.
+
+        Raises:
+            LinkCacheUnavailable: the cache itself could not be read. None
+                means "no such link, or expired"; the two are different
+                answers and used to be indistinguishable (F-X1).
         """
         try:
             with self._connection() as conn:
@@ -261,8 +315,16 @@ class SecureLinkCache:
                 return None
 
         except Exception as e:
-            logger.error(f"Error resolving persistent link {link_hash[:8]}...: {e}")
-            return None
+            # F-X1: this used to return None like a genuine miss, so the route
+            # told the user "your link expired, generate a new one" — an
+            # operational fault presented as a user error, with the suggested
+            # remedy producing another link that also failed. The route
+            # answers 503 for this now.
+            logger.error(
+                f"Link cache unavailable while resolving {link_hash[:8]}...: "
+                f"{type(e).__name__}"
+            )
+            raise LinkCacheUnavailable(str(e)) from e
 
     def _update_access(self, link_hash: str):
         """Update access tracking for a link."""

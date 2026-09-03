@@ -4,7 +4,9 @@ This document details the sophisticated prompt templates included with the USPTO
 
 ## ⚡️ Prompt Templates (Attorney-Friendly Workflows)
 
-**NEW FEATURE**: The FPD MCP now includes 10 prompt templates that appear in Claude Desktop UI. These templates automate complex multi-step workflows and eliminate the need to memorize tool syntax.
+**NEW FEATURE**: The FPD MCP includes 10 prompt templates that appear in Claude Desktop UI. These templates automate complex multi-step workflows and eliminate the need to memorize tool syntax.
+
+**Opt-in (server-side)**: Prompt templates register only when the server is started with `FPD_ENABLE_PROMPTS=true`. By default (unset/false) no prompts are advertised, on stdio and HTTP alike.
 
 ### 🎯 **How to Use Prompt Templates**
 
@@ -147,7 +149,7 @@ The MCP server includes AI-optimized prompt templates designed for patent attorn
 **Key Features**:
 - **Organized retrieval**: Systematic collection of all petition-related documents
 - **Priority-based selection**: Focuses on most relevant documents for analysis goals
-- **Cost optimization**: Strategic document extraction to minimize OCR costs
+- **Focused extraction**: Strategic document selection so only the key documents are extracted
 - **Legal analysis preparation**: Organizes materials for attorney review
 
 **Use Cases**:
@@ -180,22 +182,46 @@ The MCP server includes AI-optimized prompt templates designed for patent attorn
 
 All prompt templates include **Enhanced Input Processing** capabilities:
 
-### Flexible Identifier Support
-- **Petition IDs**: UUID identifiers from FPD searches
-- **Application Numbers**: "17896175", "17/896,175", "US17/896,175"
-- **Patent Numbers**: "9049188", "US9049188B2", "9,049,188"
-- **Company Names**: "TechCorp Inc.", partial company names
+### Identifier Formats the Server Accepts
 
-### Smart Validation
-- **Input type detection**: Automatically determines identifier format
-- **Format normalization**: Standardizes various input formats
-- **Validation guidance**: Provides helpful error messages and suggestions
-- **Cross-MCP linking**: Identifies opportunities for enhanced analysis
+The server does **not** normalize arbitrary identifier styles. Pass identifiers
+in the forms below; anything else is rejected or silently matches nothing.
+
+- **Petition IDs** (`petition_id`): the UUID returned by an FPD search, e.g.
+  `e55bd36d-961f-511e-b72c-b4b1529d67ef`. Any other shape is rejected.
+- **Document identifiers** (`document_identifier`): the alphanumeric code from
+  a `documentBag` entry, e.g. `HY1J6ICXPXXIFW4`.
+- **Application numbers** (`application_number`): digits only. Slashes and
+  spaces are stripped, so `13408005` and `13/408005` both work. **Commas and
+  letters are rejected**: `13/408,005` and `US13/408,005` return a 400
+  ("Application number should contain only digits").
+- **Patent numbers** (`patent_number`): the bare digits as granted, e.g.
+  `8938380`. The value goes into the query as given, so `8,938,380` and
+  `US8938380B2` match nothing rather than erroring.
+- **Company names** (`applicant_name`): `"Apple"`, `"TechCorp Inc."`, or a
+  partial name.
+
+### Namespace Caution
+
+This server does not lane-resolve between application serials and patent
+numbers. Patent numbers passed 10,000,000 in mid-2018, so the two collide at
+eight digits: an 8-digit patent number passed as `application_number` returns
+a clean empty result that reads as "no petitions" rather than an error. Use
+the PFW MCP as the crosswalk
+(`PFW_search_applications_minimal(query='patentNumber:<n>')`).
+
+### Validation Behavior
+- **Shape validation**: `petition_id` and `document_identifier` are checked
+  against their expected patterns before any outbound call
+- **Structured errors**: rejected input returns a 400 envelope with a
+  `request_id` for correlation
+- **Cross-MCP linking**: `applicationNumberText` and `patentNumber` on every
+  record are the join keys into the PFW, PTAB, and Citations MCPs
 
 ### Context Optimization
 - **Progressive disclosure**: Minimal → balanced → detailed information retrieval
 - **Token efficiency**: 80-99% context reduction through targeted field selection
-- **Cost transparency**: Clear indication of OCR costs and optimization strategies
+- **Method transparency**: Clear indication of which extraction method was used
 - **Strategic guidance**: Built-in recommendations for efficient workflows
 
 ## 📈 Enhanced Citations Integration Templates

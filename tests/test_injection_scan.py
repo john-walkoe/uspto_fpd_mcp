@@ -1,7 +1,7 @@
 """Unit + wiring tests for the runtime injection-scan posture.
 
 Scanner tests are deliberately sync (pure-module scanner, no async needed).
-Wiring tests call the real FPD_get_document_content_with_mistral_ocr tool
+Wiring tests call the real FPD_get_document_content_with_ocr tool
 function over the mock_runtime seam and assert the envelope contract:
 `provenance_note` always present on the text-bearing tool, `injection_scan`
 COMPLETELY ABSENT when the extracted text is clean, present (kind labels
@@ -70,7 +70,7 @@ def test_scan_hits_payload_contains_no_matched_text():
 
 
 # ---------------------------------------------------------------------------
-# Wiring tests: FPD_get_document_content_with_mistral_ocr envelope
+# Wiring tests: FPD_get_document_content_with_ocr envelope
 # ---------------------------------------------------------------------------
 
 def _extraction_result(text: str):
@@ -79,8 +79,7 @@ def _extraction_result(text: str):
         "document_code": "PET",
         "page_count": 5,
         "extracted_content": text,
-        "extraction_method": "PyPDF2",
-        "processing_cost_usd": 0.0,
+        "extraction_method": "pypdf",
     }
 
 

@@ -1,10 +1,14 @@
 """
 Secure logger wrapper that enforces sanitization.
 
-NOT deprecated (2026-07 audit sweep): a migration to shared.unified_logging
-was once planned and has been rejected — UnifiedLogger does not sanitize
-positional format args the way SecureLogger does, so this stays the module
-logger for main/tools/middleware/bootstrap.
+Kept as the module logger for main/tools/middleware/bootstrap. The 2026-07
+sweep rejected a migration to shared.unified_logging because UnifiedLogger
+did not sanitize positional format args the way this class does. That is no
+longer true (F-A4, 2026-09-03): `UnifiedLogger._sanitize_call` scrubs them
+too, so the two facades enforce the same guarantee and the choice of import
+no longer changes behavior. Consolidating to one is now a mechanical move
+rather than a posture change, and is deliberately left for its own commit —
+this file is imported by 7 modules and the sweep should land alone.
 
 Fixes:
 - CWE-117: Improper Output Neutralization for Logs (log injection)

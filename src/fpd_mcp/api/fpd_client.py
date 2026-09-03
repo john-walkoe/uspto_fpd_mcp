@@ -19,9 +19,10 @@ from ..shared.error_utils import (
     RateLimitError,
     AuthenticationError,
 )
-from ..shared.circuit_breaker import CircuitBreaker
+from ..shared.circuit_breaker import CircuitBreaker, CircuitBreakerOpenError
 from ..shared.cache import CacheManager
 from ..shared.uspto_shared_rate_limiter import get_shared_limiter
+from ..shared.uspto_hosts import USPTO_KEY_EVENT_HOOKS
 from ..config import api_constants
 from ..shared.unified_logging import get_logger
 from ..services.document_extraction import (
@@ -32,7 +33,9 @@ from ..services.document_extraction import (
     # services/document_extraction.py alongside the extraction pipeline
     # they guard.
     _mistral_daily_cost_state,  # noqa: F401
-    _mistral_daily_spend_check,  # noqa: F401
+    _mistral_daily_spend_reserve,  # noqa: F401
+    _mistral_daily_spend_release,  # noqa: F401
+    _mistral_daily_spend_settle,  # noqa: F401
     _mistral_daily_spend_add,  # noqa: F401
 )
 from .field_constants import FPDFields, QueryFieldNames
@@ -47,7 +50,49 @@ logger = get_logger(__name__)
 # `fpd_client_module._MAX_PDF_BYTES` and expect the change to take live
 # effect — that only works if the constant and the code reading it
 # (`_download_pdf_for_extraction` below) live in the same module.
-_MAX_PDF_BYTES = 100 * 1024 * 1024  # 100MB
+# M-18: lowered from 100 MB to a petition-realistic 25 MB. A petition
+# decision plus its file-wrapper papers does not reach 25 MB; the old ceiling
+# admitted a body two orders of magnitude larger than any real document into
+# a buffer that then feeds an in-memory pypdf parse. Override with
+# FPD_MAX_PDF_BYTES for an unusual corpus.
+def _max_pdf_bytes_from_env() -> int:
+    raw = os.getenv("FPD_MAX_PDF_BYTES", "")
+    if not raw.strip():
+        return 25 * 1024 * 1024
+    try:
+        return max(1, int(raw))
+    except (TypeError, ValueError):
+        logger.warning("Invalid FPD_MAX_PDF_BYTES; using 25MB")
+        return 25 * 1024 * 1024
+
+
+_MAX_PDF_BYTES = _max_pdf_bytes_from_env()
+
+# M-18: bound how many extractions can hold a buffered PDF at once. The byte
+# cap bounds ONE download; nothing bounded the number of concurrent ones, so
+# the real memory ceiling was cap x in-flight calls.
+_MAX_CONCURRENT_EXTRACTIONS = 3
+_extraction_slots = asyncio.Semaphore(_MAX_CONCURRENT_EXTRACTIONS)
+
+
+class UpstreamFailure(Exception):
+    """A USPTO failure that has exhausted its retry budget, carried as an
+    exception so `CircuitBreaker.call` counts it.
+
+    The retry loop used to RETURN a `format_error_response` envelope for
+    every failure mode, and the breaker only increments `failure_count` in
+    its `except` block, so it recorded a success on every upstream outage and
+    could never open (error-handling-resilience F-E1, reproduced with 36
+    mocked 503s). `_make_request` unwraps this back into the same envelope,
+    so no caller sees a behavior change beyond the breaker now working.
+
+    Non-retryable 4xx deliberately still return normally: a 404 is not an
+    upstream health signal.
+    """
+
+    def __init__(self, envelope: Dict[str, Any]):
+        self.envelope = envelope
+        super().__init__(str(envelope.get("error", "upstream failure")))
 
 
 def _backfill_wrapper_page_counts(document_bag: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -75,6 +120,23 @@ def _backfill_wrapper_page_counts(document_bag: List[Dict[str, Any]]) -> List[Di
     return document_bag
 
 
+def _retry_after_seconds(exc: Exception, default: float = 0.0) -> float:
+    """Seconds the upstream asked us to wait, from its Retry-After header.
+
+    F-R3: this header was parsed in one place, stored on a RateLimitError
+    nobody read, and ignored entirely by the retry loop. Only the
+    delta-seconds form is honored; an HTTP-date Retry-After returns the
+    default rather than guessing at clock skew.
+    """
+    response = getattr(exc, "response", None)
+    if response is None:
+        return default
+    try:
+        return max(0.0, float(response.headers.get("Retry-After", default)))
+    except (TypeError, ValueError):
+        return default
+
+
 def _client_method_error_handler(method_name: str) -> Callable:
     """Decorator consolidating the 4 identical outer try/except blocks
     previously duplicated in search_petitions, get_petition_by_id,
@@ -87,7 +149,13 @@ def _client_method_error_handler(method_name: str) -> Callable:
             try:
                 return await func(*args, **kwargs)
             except Exception as e:
-                logger.error(f"Error in {method_name}: {str(e)}")
+                # F-D4 / F-X5: this catch-all absorbs programming errors too
+                # (an AttributeError in _attach_documents_to_search_hits used
+                # to become "Internal server error occurred" with no traceback
+                # anywhere), so it logs one.
+                logger.error(
+                    f"Error in {method_name}: {type(e).__name__}", exc_info=True
+                )
                 return format_error_response(str(e), 500, generate_request_id())
         return wrapper
     return decorator
@@ -96,9 +164,13 @@ def _client_method_error_handler(method_name: str) -> Callable:
 class FPDClient:
     """Client for USPTO Final Petition Decisions API"""
 
-    # Constants for better readability and maintainability
+    # Constants for better readability and maintainability.
+    # MAX_SEARCH_LIMIT is deliberately the SAME value the tool layer
+    # validates against (api_constants.MAX_SEARCH_LIMIT): a client ceiling
+    # that differs from the tool ceiling clamps silently, so an envelope
+    # could report a requested limit the request never actually used.
     DEFAULT_LIMIT = 25
-    MAX_SEARCH_LIMIT = 1000
+    MAX_SEARCH_LIMIT = api_constants.MAX_SEARCH_LIMIT
     MAX_CONCURRENT_REQUESTS = 10
 
     # Retry configuration
@@ -126,7 +198,13 @@ class FPDClient:
             from ..shared_secure_storage import get_uspto_api_key, resolve_api_key
             self.api_key = resolve_api_key(api_key, get_uspto_api_key, "USPTO_API_KEY")
         except Exception as e:
-            logger.debug(f"USPTO API key resolution via secure storage failed ({type(e).__name__}); falling back to parameter/env var")
+            # F-E10: logged at DEBUG, so an operator whose secure store was
+            # misconfigured saw nothing at INFO and the server silently ran
+            # on whatever the environment happened to hold.
+            logger.warning(
+                f"USPTO API key resolution via secure storage failed "
+                f"({type(e).__name__}); falling back to parameter/env var"
+            )
             self.api_key = api_key or os.getenv("USPTO_API_KEY")
 
         if not self.api_key:
@@ -137,6 +215,9 @@ class FPDClient:
             "Content-Type": "application/json",
             "Accept": "application/json"
         }
+
+        # F-R7: one pooled httpx client per FPDClient, built on first send.
+        self._http_client: Optional[httpx.AsyncClient] = None
 
         # Configurable timeouts from environment variables (with fallbacks)
         self.default_timeout = float(os.getenv("USPTO_TIMEOUT", "30.0"))
@@ -153,7 +234,9 @@ class FPDClient:
                    f"keepalive={self.connection_limits.max_keepalive_connections}")
 
         # Service-specific semaphore for better resource isolation
-        self.uspto_semaphore = asyncio.Semaphore(10)  # USPTO API requests
+        # F-R9: MAX_CONCURRENT_REQUESTS was declared and then never read;
+        # the real bulkhead was a literal 10 three dozen lines away.
+        self.uspto_semaphore = asyncio.Semaphore(self.MAX_CONCURRENT_REQUESTS)
 
         # Circuit breaker for resilience
         self.uspto_circuit_breaker = CircuitBreaker(
@@ -209,24 +292,33 @@ class FPDClient:
         if status == 404:
             mapped_exc = NotFoundError(message, request_id)
         elif status == 429:
-            try:
-                retry_after = int(e.response.headers.get("Retry-After", 60))
-            except (TypeError, ValueError):
-                retry_after = 60
-            mapped_exc = RateLimitError(message, retry_after, request_id)
+            mapped_exc = RateLimitError(
+                message, request_id,
+                retry_after=int(_retry_after_seconds(e, default=60.0)),
+            )
         elif status == 401:
             mapped_exc = AuthenticationError(message, request_id)
         else:
             return format_error_response(message, status, request_id)
-        return format_error_response(
+        envelope = format_error_response(
             mapped_exc.message, mapped_exc.status_code, mapped_exc.request_id
         )
+        # F-R3: the parsed wait was dropped on the floor. Tell the caller how
+        # long the upstream asked for so it can back off too.
+        if isinstance(mapped_exc, RateLimitError):
+            envelope["retry_after"] = mapped_exc.retry_after
+        return envelope
 
     def _build_retry_exhausted_response(
         self, last_exception: Optional[Exception], request_id: str
     ) -> Dict[str, Any]:
         """Build the terminal error response once all retry attempts are
-        exhausted. Extracted from _make_request's retry loop verbatim."""
+        exhausted. Extracted from _make_request's retry loop verbatim.
+
+        The caller RAISES this envelope inside `UpstreamFailure` rather than
+        returning it: `CircuitBreaker.call` counts raised exceptions, so a
+        returned envelope read as a success and the USPTO breaker could never
+        open (error-handling-resilience F-E1)."""
         if isinstance(last_exception, httpx.TimeoutException):
             logger.error(f"[{request_id}] Request timeout after {self.RETRY_ATTEMPTS} attempts")
             return format_error_response("Request timeout - please try again", 408, request_id)
@@ -266,7 +358,12 @@ class FPDClient:
         to keep its cyclomatic complexity under the ruff C901 gate
         (mechanical decomposition, no behavior change)."""
         if isinstance(last_exception, httpx.HTTPStatusError) and last_exception.response.status_code == 429:
-            return self.RETRY_429_DELAY
+            # F-R3: the upstream told us how long to wait and both the retry
+            # loop and the 429 envelope threw it away — this returned the
+            # fixed 5s cool-down for every 429, so a throttle asking for 60s
+            # produced three rejected calls where one correctly-timed retry
+            # would have succeeded. The cool-down is now the FLOOR.
+            return max(self.RETRY_429_DELAY, _retry_after_seconds(last_exception))
         delay = self.RETRY_DELAY * (self.RETRY_BACKOFF ** attempt)
         jitter = random.uniform(0.1, 0.5)
         return delay + jitter
@@ -284,15 +381,45 @@ class FPDClient:
         send.
         """
         limiter = get_shared_limiter()
-        async with httpx.AsyncClient(timeout=self.default_timeout, verify=True, limits=self.connection_limits) as client:
-            if method.upper() == "POST":
-                send = client.post(url, headers=self.headers, **kwargs)
-            else:
-                send = client.get(url, headers=self.headers, **kwargs)
-            if limiter is not None:
-                async with limiter:
-                    return await send
-            return await send
+        client = self._get_http_client()
+        if method.upper() == "POST":
+            send = client.post(url, headers=self.headers, **kwargs)
+        else:
+            send = client.get(url, headers=self.headers, **kwargs)
+        if limiter is not None:
+            async with limiter:
+                return await send
+        return await send
+
+    def _get_http_client(self) -> "httpx.AsyncClient":
+        """The one httpx client this FPDClient sends through.
+
+        F-R7: a fresh `httpx.AsyncClient` used to be created and closed inside
+        every single send, so `self.connection_limits` — configured in
+        __init__ and logged at startup as if it were a process-wide pool — was
+        reset to an empty pool on every request and no connection was ever
+        reused. Every USPTO call paid a fresh TCP + TLS handshake.
+
+        Created lazily rather than in __init__ so the tests that patch
+        `fpd_client_module.httpx.AsyncClient` before the first request still
+        get their MockTransport.
+        """
+        if self._http_client is None:
+            self._http_client = httpx.AsyncClient(
+                timeout=self.default_timeout,
+                verify=True,
+                limits=self.connection_limits,
+            )
+        return self._http_client
+
+    async def aclose(self) -> None:
+        """Close the pooled HTTP client. Safe to call more than once."""
+        client, self._http_client = self._http_client, None
+        if client is not None:
+            try:
+                await client.aclose()
+            except Exception as e:  # pragma: no cover - shutdown path
+                logger.debug(f"HTTP client close failed: {type(e).__name__}")
 
     async def _execute_request_with_retries(
         self, method: str, url: str, request_id: str, **kwargs
@@ -328,11 +455,11 @@ class FPDClient:
                     # Don't retry unexpected errors on final attempt
                     if attempt == self.RETRY_ATTEMPTS - 1:
                         logger.error(f"[{request_id}] Request failed: {str(e)}")
-                        return format_error_response(
+                        raise UpstreamFailure(format_error_response(
                             f"Request failed: {str(e)}",
                             500,
                             request_id
-                        )
+                        ))
                     last_exception = e
 
                 # Calculate delay: fixed cool-down for 429s, exponential
@@ -346,8 +473,11 @@ class FPDClient:
                     )
                     await asyncio.sleep(total_delay)
 
-            # All retries failed
-            return self._build_retry_exhausted_response(last_exception, request_id)
+            # All retries failed. RAISE so the circuit breaker records the
+            # failure; _make_request converts it back into the same envelope.
+            raise UpstreamFailure(
+                self._build_retry_exhausted_response(last_exception, request_id)
+            )
 
     async def _make_request(
         self,
@@ -383,6 +513,12 @@ class FPDClient:
 
             return result
 
+        except UpstreamFailure as e:
+            # An upstream failure the breaker has now counted. Hand back the
+            # envelope the retry loop already built — the status mapping
+            # (408 on timeout, the upstream status on a 5xx) is preserved.
+            return e.envelope
+
         except Exception as e:
             return self._handle_circuit_breaker_error(e, method, endpoint, request_id, **kwargs)
 
@@ -390,12 +526,13 @@ class FPDClient:
         self, e: Exception, method: str, endpoint: str, request_id: str, **kwargs
     ) -> Dict[str, Any]:
         """Cache-fallback handling for a circuit-breaker error raised around
-        _execute_request. Extracted from _make_request verbatim (mechanical
-        decomposition, no behavior change)."""
+        _execute_request."""
         logger.error(f"[{request_id}] Circuit breaker error: {str(e)}")
 
-        # Try cache fallback when circuit is OPEN
-        if "Circuit breaker" in str(e) and "OPEN" in str(e):
+        # Try cache fallback when circuit is OPEN. Branching on the typed
+        # error rather than the message: with the breaker actually counting
+        # failures, real upstream exceptions now travel this path too.
+        if isinstance(e, CircuitBreakerOpenError):
             logger.warning(f"[{request_id}] Circuit OPEN - attempting cache fallback")
 
             cache_key = f"{method}_{endpoint}"
@@ -431,26 +568,40 @@ class FPDClient:
         fields: Optional[List[str]] = None,
         sort: Optional[str] = None,
         offset: int = 0,
-        limit: int = 25
+        limit: int = 25,
+        range_filters: Optional[List[Dict]] = None,
     ) -> Dict[str, Any]:
         """
         Search petition decisions using FPD API
 
         Args:
             query: Search query string (supports boolean operators, wildcards)
-            filters: List of filter objects with name and value
+            filters: List of exact-match filter objects (`name` + `value` list)
             fields: Optional list of fields to retrieve for context reduction
             sort: Sort specification (e.g., "petitionMailDate asc")
             offset: Starting position
-            limit: Maximum number of results (max 1000)
+            limit: Maximum number of results (clamped to MAX_SEARCH_LIMIT)
+            range_filters: List of `{field, valueFrom, valueTo}` objects, sent
+                as the request body's `rangeFilters`. This is the ONLY body key
+                the endpoint accepts a date/number range under — see
+                search_by_art_unit.
 
         Returns:
             Dict containing search results
         """
-        # Build request body
-        body = {
+        # Build request body. The clamp is the tool layer's MAX_SEARCH_LIMIT,
+        # not a separate (larger) client-only ceiling: a client clamp that
+        # silently differs from what the tools validate means an envelope can
+        # report a limit the request never used. Clamping is logged.
+        applied_limit = max(1, min(limit, self.MAX_SEARCH_LIMIT))
+        if applied_limit != limit:
+            logger.warning(
+                f"Search limit {limit} clamped to {applied_limit} "
+                f"(client ceiling MAX_SEARCH_LIMIT={self.MAX_SEARCH_LIMIT})"
+            )
+        body: Dict[str, Any] = {
             "pagination": {
-                "limit": min(limit, self.MAX_SEARCH_LIMIT),
+                "limit": applied_limit,
                 "offset": offset
             }
         }
@@ -462,6 +613,11 @@ class FPDClient:
         # Add filters if provided
         if filters:
             body["filters"] = filters
+
+        # Add range filters if provided (dates/numbers live under their own
+        # body key upstream — `filters` rejects a valueFrom/valueTo object)
+        if range_filters:
+            body["rangeFilters"] = range_filters
 
         # Add fields if provided (for context reduction)
         if fields:
@@ -539,9 +695,13 @@ class FPDClient:
         failed upstream (see get_petition_by_id docstring). Degrades
         gracefully to the plain without-documents result (still correct,
         just without documentBag) if either the without-documents retry or
-        the wrapper fetch itself also fails — only the additive
-        document_metadata_source/document_metadata_note keys are withheld in
-        that case, no existing key is ever altered.
+        the wrapper fetch itself also fails.
+
+        A degraded result is ALWAYS marked. Previously the explanatory note
+        was withheld on the failure paths, so the caller received a petition
+        with documentBag entirely absent — indistinguishable from a petition
+        that genuinely has no documents. No existing key is ever altered;
+        only the additive document_metadata_* keys are set.
         """
         without_docs = await self.get_petition_by_id(petition_id, include_documents=False)
         if "error" in without_docs:
@@ -553,7 +713,10 @@ class FPDClient:
 
         application_number = petition_data[0].get(FPDFields.APPLICATION_NUMBER_TEXT)
         if not application_number:
-            return without_docs
+            return self._mark_document_metadata_unavailable(
+                without_docs,
+                "no application number on the petition record to look documents up by",
+            )
 
         wrapper_result = await self.get_application_documents(application_number)
         if "error" in wrapper_result:
@@ -561,11 +724,15 @@ class FPDClient:
                 "Document-bag wrapper fallback also failed for application "
                 f"{application_number}; returning petition details without documents"
             )
-            return without_docs
+            return self._mark_document_metadata_unavailable(
+                without_docs,
+                "the application file-wrapper documents endpoint also failed",
+            )
 
         petition_data[0][FPDFields.DOCUMENT_BAG] = _backfill_wrapper_page_counts(
             wrapper_result.get(FPDFields.DOCUMENT_BAG, [])
         )
+        without_docs["document_metadata_available"] = True
         without_docs["document_metadata_source"] = "application_file_wrapper_fallback"
         without_docs["document_metadata_note"] = (
             "USPTO's petition-details includeDocuments=true endpoint is "
@@ -573,6 +740,24 @@ class FPDClient:
             "the application file wrapper (the same underlying documents)."
         )
         return without_docs
+
+    @staticmethod
+    def _mark_document_metadata_unavailable(
+        result: Dict[str, Any], reason: str
+    ) -> Dict[str, Any]:
+        """Mark a petition-details response whose documentBag could not be
+        retrieved, so an absent bag is never mistaken for 'no documents'."""
+        result["document_metadata_available"] = False
+        result["document_metadata_source"] = "unavailable"
+        result["document_metadata_note"] = (
+            "documentBag could NOT be retrieved for this petition "
+            f"({reason}); USPTO's petition-details includeDocuments=true "
+            "endpoint is erroring upstream. An absent documentBag here means "
+            "'metadata unavailable', NOT 'this petition has no documents'. "
+            "Retry later, or use FPD_get_document_download with a "
+            "documentIdentifier obtained elsewhere."
+        )
+        return result
 
     @_client_method_error_handler("get_application_documents")
     async def get_application_documents(self, application_number: str) -> Dict[str, Any]:
@@ -602,7 +787,8 @@ class FPDClient:
         self,
         art_unit: str,
         date_range: Optional[str] = None,
-        limit: int = 50
+        limit: int = 50,
+        offset: int = 0,
     ) -> Dict[str, Any]:
         """
         Search petitions by art unit number
@@ -611,20 +797,30 @@ class FPDClient:
             art_unit: Art unit number (e.g., "2128")
             date_range: Optional date range filter (e.g., "2020-01-01:2024-12-31")
             limit: Maximum number of results
+            offset: Starting position, for paging past `limit`
 
         Returns:
             Dict containing search results
+
+        Date-range provenance (probed live 2026-08-30 against
+        api.uspto.gov/api/v1/petition/decisions/search): the
+        `{field, valueFrom, valueTo}` object is correct, but it must be sent
+        under the body key `rangeFilters`. Sending it under `filters` — which
+        is what this method did until 2026-08-30 — answers HTTP 400 Bad Request
+        with no detailedMessage, so every date_range call failed regardless of
+        how well-formed the caller's string was. Art unit 3643: 21 records
+        unfiltered, 11 within 2015-01-01..2016-12-31.
         """
         # Build query
         query = f"{QueryFieldNames.ART_UNIT}:{art_unit}"
 
-        # Build filters for date range if provided
-        filters = []
+        # Build range filters for date range if provided
+        range_filters = []
         if date_range:
             # Parse date range
             parts = date_range.split(":")
             if len(parts) == 2:
-                filters.append({
+                range_filters.append({
                     "field": FPDFields.PETITION_MAIL_DATE,
                     "valueFrom": parts[0],
                     "valueTo": parts[1]
@@ -632,15 +828,19 @@ class FPDClient:
 
         return await self.search_petitions(
             query=query,
-            filters=filters if filters else None,
-            limit=limit
+            range_filters=range_filters if range_filters else None,
+            limit=limit,
+            offset=offset,
         )
 
     @_client_method_error_handler("search_by_application")
     async def search_by_application(
         self,
         application_number: str,
-        include_documents: bool = False
+        include_documents: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+        fields: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Search petitions for specific application number
@@ -648,41 +848,96 @@ class FPDClient:
         Args:
             application_number: USPTO application number
             include_documents: Whether to include document bag
+            limit: Maximum number of results (was a hard-coded 100 with no
+                paging at all, so an application with more petitions than
+                that silently lost the remainder)
+            offset: Starting position, for paging past `limit`
+            fields: Field projection to request. `None` asks USPTO for the
+                full record.
 
-        Returns:
-            Dict containing search results
+        D-3 (code-duplication-detection): this method used to carry its own
+        16-element field list, a fourth copy of the petition field sets that
+        had already diverged from `petitions_balanced` in
+        `field_configs.yaml` (it omitted businessEntityStatusCategory and
+        inventionTitle). A customer who edited that YAML per CUSTOMIZATION.md
+        changed what four tools returned and had no effect here. The client is
+        now field-agnostic like every other method on it; `FPDService`, which
+        is the layer that owns the `FieldManager`, resolves the set and passes
+        it down.
         """
         # Build query
         query = f"{QueryFieldNames.APPLICATION_NUMBER}:{application_number}"
 
-        # Build fields list
-        fields = None
-        if not include_documents:
-            # Exclude documentBag for context reduction
-            fields = [
-                FPDFields.PETITION_DECISION_RECORD_IDENTIFIER,
-                FPDFields.APPLICATION_NUMBER_TEXT,
-                FPDFields.PATENT_NUMBER,
-                FPDFields.FIRST_APPLICANT_NAME,
-                FPDFields.DECISION_TYPE_CODE_DESCRIPTION_TEXT,
-                FPDFields.PETITION_MAIL_DATE,
-                FPDFields.DECISION_DATE,
-                FPDFields.FINAL_DECIDING_OFFICE_NAME,
-                FPDFields.DECISION_PETITION_TYPE_CODE,
-                FPDFields.DECISION_PETITION_TYPE_CODE_DESCRIPTION_TEXT,
-                FPDFields.GROUP_ART_UNIT_NUMBER,
-                FPDFields.TECHNOLOGY_CENTER,
-                FPDFields.PROSECUTION_STATUS_CODE_DESCRIPTION_TEXT,
-                FPDFields.PETITION_ISSUE_CONSIDERED_TEXT_BAG,
-                FPDFields.RULE_BAG,
-                FPDFields.STATUTE_BAG
-            ]
-
-        return await self.search_petitions(
+        result = await self.search_petitions(
             query=query,
-            fields=fields,
-            limit=100
+            fields=None if include_documents else fields,
+            limit=limit,
+            offset=offset,
         )
+
+        if include_documents and "error" not in result:
+            result = await self._attach_documents_to_search_hits(
+                result, application_number
+            )
+
+        return result
+
+    async def _attach_documents_to_search_hits(
+        self, result: Dict[str, Any], application_number: str
+    ) -> Dict[str, Any]:
+        """Give every petition in a by-application search hit a documentBag.
+
+        The search endpoint has no `includeDocuments` switch at all — asking
+        for the unfiltered record simply returns the petition fields without a
+        documentBag — so `include_documents=True` on
+        FPD_Search_petitions_by_application was a documented no-op until
+        2026-08-30. This attaches the SAME bag get_petition_by_id currently
+        serves: USPTO's petition-details includeDocuments=true endpoint has
+        been 500-ing since at least 2026-07-04, so that path also falls back to
+        the application file wrapper (see
+        _petition_documents_via_wrapper_fallback). Every petition in this
+        result set is on the SAME application by construction, so one wrapper
+        fetch covers the whole page rather than one call per record.
+
+        The substitution is labelled with the same document_metadata_* keys
+        the details path uses; a failure is labelled too, never left as an
+        absent bag that reads as "this petition has no documents".
+        """
+        records = result.get(FPDFields.PETITION_DECISION_DATA_BAG)
+        if not isinstance(records, list) or not records:
+            return result
+
+        wrapper_result = await self.get_application_documents(application_number)
+        if "error" in wrapper_result:
+            logger.warning(
+                "Document-bag wrapper fetch failed for application "
+                f"{application_number}; returning petitions without documents"
+            )
+            return self._mark_document_metadata_unavailable(
+                result,
+                "the application file-wrapper documents endpoint failed",
+            )
+
+        document_bag = _backfill_wrapper_page_counts(
+            wrapper_result.get(FPDFields.DOCUMENT_BAG, [])
+        )
+        for record in records:
+            if isinstance(record, dict):
+                record[FPDFields.DOCUMENT_BAG] = document_bag
+
+        result["document_metadata_available"] = True
+        result["document_metadata_source"] = "application_file_wrapper"
+        result["document_metadata_note"] = (
+            "The FPD search endpoint serves no documentBag of its own, and "
+            "USPTO's petition-details includeDocuments=true endpoint is "
+            "currently erroring upstream, so documentBag was taken from the "
+            "APPLICATION FILE WRAPPER — the same source "
+            "FPD_Get_petition_details serves today. It is the application's "
+            "whole prosecution history (office actions, claims, IDS, ...), "
+            "not only the petition papers, and it is identical on every "
+            "petition of this application."
+        )
+        return result
 
     async def _download_pdf_for_extraction(self, download_url: str) -> bytes:
         """Stream a PDF from the USPTO API with a running byte-count cap and
@@ -691,11 +946,21 @@ class FPDClient:
         (M7/L24). Extracted from extract_document_content_hybrid; kept on
         FPDClient (see module-level `_MAX_PDF_BYTES` comment) rather than
         moved into DocumentExtractionService.
+
+        The `request` event hook drops `X-API-KEY` on any hop that is not
+        https on uspto.gov (M-16): these URLs 302 to signed storage URLs and
+        httpx strips only `Authorization` and `Cookie` across origins, so the
+        shared ODP key was reaching the redirect target verbatim.
+
+        M-18: held under `_extraction_slots` so the process-wide memory
+        ceiling is `_MAX_PDF_BYTES x _MAX_CONCURRENT_EXTRACTIONS` rather than
+        `_MAX_PDF_BYTES x however many calls are in flight`.
         """
-        async with httpx.AsyncClient(
+        async with _extraction_slots, httpx.AsyncClient(
             timeout=self.download_timeout,
             limits=self.connection_limits,
-            follow_redirects=True
+            follow_redirects=True,
+            event_hooks=USPTO_KEY_EVENT_HOOKS
         ) as client:
             async with client.stream(
                 "GET",
@@ -732,14 +997,20 @@ class FPDClient:
     # ------------------------------------------------------------------
 
     def is_good_extraction(self, text: str) -> bool:
-        """Determine if PyPDF2 extraction is usable or if we need Mistral OCR."""
+        """Determine if pypdf extraction is usable or if we need Mistral OCR."""
         return self._extraction.is_good_extraction(text)
 
-    async def extract_with_pypdf2(
-        self, pdf_content: bytes, max_pages: int = 200
+    async def extract_with_pypdf(
+        self,
+        pdf_content: bytes,
+        max_pages: int = 200,
+        status: Optional[Dict[str, Any]] = None,
     ) -> Tuple[str, bool]:
-        """Extract text using pypdf (free, fast, works for text-based PDFs)."""
-        return await self._extraction.extract_with_pypdf2(pdf_content, max_pages)
+        """Extract text using pypdf (free, fast, works for text-based PDFs).
+
+        `status` is the optional out-dict for partial-extraction reporting —
+        see DocumentExtractionService.extract_with_pypdf."""
+        return await self._extraction.extract_with_pypdf(pdf_content, max_pages, status)
 
     async def extract_with_mistral_ocr(self, pdf_content: bytes, page_count: int = 0) -> Tuple[str, float]:
         """Extract text using Mistral OCR API (no poppler/pdf2image required)."""

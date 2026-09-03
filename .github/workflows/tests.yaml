@@ -1,0 +1,54 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+jobs:
+  test:
+    name: Lint and unit tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run ruff
+        # Q-1: src/ is clean as of the 2026-09-03 fix wave, so this is a
+        # blocking gate there. tests/ still carries pre-existing findings in
+        # the two excluded key-management modules, so it stays advisory.
+        run: uv run ruff check src
+
+      - name: Run ruff over tests (advisory)
+        continue-on-error: true
+        run: uv run ruff check tests
+
+      - name: Run mypy (advisory ratchet)
+        # Q-7: 40 errors under the committed lenient config, down from 48.
+        # Advisory so the count can only be driven down deliberately; the
+        # step exists so a regression is visible in the run log.
+        continue-on-error: true
+        run: uv run mypy src/fpd_mcp
+
+      - name: Run pytest
+        run: uv run pytest -q
+
+      - name: Audit dependencies for known advisories
+        # L-25: the repo had no dependency advisory gate at all. Advisory
+        # because an upstream CVE disclosure must not block an unrelated
+        # merge; it does put the finding in the run log the same day.
+        continue-on-error: true
+        run: uv run --with pip-audit pip-audit

@@ -33,6 +33,7 @@ class SecurityEventType(Enum):
     UNUSUAL_ACCESS_PATTERN = "unusual_access_pattern"
     PRIVILEGE_ESCALATION_ATTEMPT = "privilege_escalation_attempt"
     LOG_TAMPERING_DETECTED = "log_tampering_detected"
+    ADMIN_ACTION = "admin_action"
 
 
 class SecurityLogger:
@@ -186,6 +187,45 @@ class SecurityLogger:
                 "event_type": SecurityEventType.SUSPICIOUS_ACTIVITY.value,
                 "indicators": safe_indicators,
                 "risk_score": risk_score
+            },
+            severity="high"
+        )
+
+    def log_admin_action(
+        self,
+        actor: str,
+        action: str,
+        target: str,
+        success: bool = True,
+        role: Optional[str] = None,
+        detail: Optional[str] = None
+    ):
+        """
+        Log a privileged mcp_users mutation.
+
+        The user table is the authorization source of truth for OAuth sign-in
+        and is shared with PFW and PTAB, so a grant made here is a grant on
+        three servers. Every add / set_role / activate / deactivate needs a
+        record naming who made it. Emails are masked by the sink filter.
+
+        Args:
+            actor: Authenticated identity performing the action
+            action: One of add, set_role, activate, deactivate
+            target: Email of the affected user
+            success: Whether the mutation was applied
+            role: Role granted, for add / set_role
+            detail: Optional failure reason
+        """
+        self.logger.log_security_event(
+            event_description=f"User management action: {action} on {target}",
+            request_details={
+                "event_type": SecurityEventType.ADMIN_ACTION.value,
+                "actor": actor,
+                "action": action,
+                "target": target,
+                "role": role,
+                "success": success,
+                "detail": detail
             },
             severity="high"
         )

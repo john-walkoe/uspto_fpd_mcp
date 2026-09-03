@@ -24,7 +24,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -32,9 +31,14 @@ from typing import Any, AsyncIterator
 
 import aiosqlite
 
+from ..shared.unified_logging import get_logger
+
 UTC = timezone.utc
 
-log = logging.getLogger(__name__)
+# F-A4: this was the one module using the raw stdlib logger, bypassing both
+# sanitizing facades. The sink-level SanitizingFilter is the real guarantee,
+# but there is no reason for this file to be the exception.
+log = get_logger(__name__)
 
 VALID_ROLES = ("user", "admin")
 
@@ -162,13 +166,41 @@ class McpUserStore:
             await db.commit()
 
     async def set_active(self, email: str, active: bool) -> bool:
+        """Activate or deactivate a user.
+
+        M-7: deactivation used to take effect only at the user's next token
+        refresh, so a revoked account kept working for up to the access-token
+        TTL (1h) and, worse, could refresh indefinitely if it still held a
+        live refresh token. Deactivating now revokes every refresh token for
+        that identity, which is the half of the finding that lives in code
+        (the other half, FPD_AUTH_ACCESS_TTL=900, is a deployment env value).
+        """
+        normalized = email.strip().lower()
         async with self._db() as db:
             cur = await db.execute(
                 "UPDATE mcp_users SET active = ? WHERE email = ?",
-                (int(active), email.strip().lower()),
+                (int(active), normalized),
             )
             await db.commit()
-        return cur.rowcount == 1
+        changed = cur.rowcount == 1
+        if changed and not active:
+            revoked = await self.revoke_all_refresh_for_email(normalized)
+            if revoked:
+                log.info(
+                    "Deactivation revoked %d live refresh token(s)", revoked
+                )
+        return changed
+
+    async def revoke_all_refresh_for_email(self, email: str) -> int:
+        """Revoke every live refresh token for an identity, any client."""
+        async with self._db() as db:
+            cur = await db.execute(
+                "UPDATE oauth_refresh_tokens SET revoked = 1 "
+                "WHERE email = ? AND revoked = 0",
+                (email.strip().lower(),),
+            )
+            await db.commit()
+        return cur.rowcount or 0
 
     async def record_login(self, email: str, idp: str) -> None:
         async with self._db() as db:

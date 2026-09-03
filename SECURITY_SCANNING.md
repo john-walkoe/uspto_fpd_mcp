@@ -298,11 +298,11 @@ detect-secrets --version
 ### Install Pre-commit Hooks
 
 ```bash
-# Install pre-commit package
-pip install pre-commit
+# Install pre-commit package (declared in the repo's dev dependency group)
+uv sync --group dev
 
 # Install git hooks (run from project root)
-cd C:\Users\JohnWalkoe\uspto_fpd_mcp
+cd C:\Users\YOUR_USERNAME\uspto_fpd_mcp
 pre-commit install
 
 # Verify installation
@@ -582,7 +582,7 @@ uv tool run detect-secrets scan --baseline .secrets.baseline --exclude-files 'la
 **Mistral API Key (optional):**
 - Store in same Claude Desktop config file
 - Or use environment variable: `$env:MISTRAL_API_KEY="your_key"`
-- Monitor usage costs ($0.001/page for OCR)
+- Monitor account usage in the Mistral console; `MISTRAL_OCR_DAILY_BUDGET_USD` bounds the server's own daily OCR usage
 
 ### For Code Reviews
 

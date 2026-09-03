@@ -42,8 +42,40 @@ DEFAULT_CACHE_TTL_SECONDS = 600
 MIN_SEARCH_LIMIT = 1
 """Minimum number of search results per page"""
 
-MAX_SEARCH_LIMIT = 200
-"""Maximum number of search results per page (USPTO API constraint)"""
+MAX_SEARCH_OFFSET = 10_000
+"""Highest `offset` a search tool will forward to USPTO.
+
+L-19: offset had a lower bound and no upper bound, so `offset=10**12` was
+sent upstream verbatim — a deep-paging request against the operator's shared
+quota for a corpus whose largest class is in the low thousands. The ceiling
+is generous relative to the corpus and finite, which the previous state was
+not.
+"""
+
+MAX_SEARCH_LIMIT = 100
+"""Maximum number of search results per page (USPTO API constraint).
+
+Single source of truth for the ceiling: api/fpd_client.py's
+FPDClient.MAX_SEARCH_LIMIT is bound to this value so the client can never
+clamp to a different number than the tool layer validated against.
+
+Was 200 until 2026-08-30. Probed live that day against
+https://api.uspto.gov/api/v1/petition/decisions/search: a pagination limit of
+200 comes back HTTP 400 "Requested page limit exceeds allowed limit 100,
+please refine your search criteria", while 100 is served. The whole 101..200
+band was therefore advertised, accepted by the tool layer, and guaranteed to
+fail upstream — a wasted round trip every time. A limit above the ceiling is
+now CLAMPED (see tools/petitions.py::_clamp_search_limit) rather than
+rejected, matching the sibling PFW server; page past it with offset=.
+"""
+
+MAX_BALANCED_SEARCH_LIMIT = 50
+"""Maximum results per page for the balanced tier.
+
+Lower than MAX_SEARCH_LIMIT on purpose — balanced records carry ~18 fields,
+so 200 of them blow the client response-size cap. Was an unexplained
+hard-coded 1..50 check inside the tool.
+"""
 
 DEFAULT_MINIMAL_SEARCH_LIMIT = 50
 """Default limit for minimal tier searches (discovery)"""

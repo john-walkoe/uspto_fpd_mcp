@@ -7,7 +7,10 @@ Manages environment variables and application settings.
 import os
 from pathlib import Path
 from typing import Optional
+from pydantic import Field
 from pydantic_settings import BaseSettings
+
+from . import api_constants
 
 # Import unified secure storage functionality
 try:
@@ -42,14 +45,30 @@ class Settings(BaseSettings):
     # API Configuration
     api_base_url: str = "https://api.uspto.gov/api/v1/petition/decisions"
 
-    # Default Search Limits
-    default_minimal_limit: int = 50
-
-    # Validation Limits
-    max_search_limit: int = 200
+    # F-A6 (initial-software-design-analyis): these two carried their own
+    # literals, and `max_search_limit` was still 200 after USPTO started
+    # answering limit=200 with HTTP 400 and api_constants.MAX_SEARCH_LIMIT
+    # dropped to 100 on 2026-08-30. Nothing read them, which is the only
+    # reason the dead 101..200 band was not re-introduced — a stale ceiling
+    # sitting in the settings class is exactly the value a future contributor
+    # wires up. They now derive from the single source of truth.
+    default_minimal_limit: int = api_constants.DEFAULT_MINIMAL_SEARCH_LIMIT
+    max_search_limit: int = api_constants.MAX_SEARCH_LIMIT
 
     # File Paths
     field_config_path: Optional[Path] = None
+
+    # HTTP transport
+    # Stateless streamable HTTP: no server-side session table, every request is
+    # self-contained. Required for clients that don't replay mcp-session-id
+    # (GitHub Copilot) and for load-balanced/multi-replica deploys. Stateful
+    # clients still work — they just get an ephemeral session per request.
+    # validation_alias keeps the bare FASTMCP_ name (no FPD_MCP_ prefix),
+    # matching FASTMCP_TRANSPORT/HOST/PORT.
+    fastmcp_stateless_http: bool = Field(
+        default=True,
+        validation_alias="FASTMCP_STATELESS_HTTP",
+    )
 
     class Config:
         env_prefix = "FPD_MCP_"

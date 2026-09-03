@@ -3,7 +3,7 @@
 Several tools require API keys to function. For the USPTO FPD MCP Server:
 
 - **USPTO API Key**: Required and free
-- **Mistral API Key**: Optional, has a free tier for testing, but paid plan recommended for production use
+- **Mistral API Key**: Optional. Enables OCR of scanned petition documents. Documents that carry a native text layer are extracted without it, and a self-hosted Docling backend can be configured instead (`DOCLING_SERVE_URL`)
 
 Follow these steps to obtain your API keys:
 
@@ -116,7 +116,7 @@ However, if you use the API key separately outside the scope of the USPTO FPD MC
 - Scan and OCR client documents
 - Use other Mistral API endpoints (e.g., chat API)
 
-Then the **free tier may not be appropriate** due to the terms of service stating: **"API requests may be used to improve our services"**
+Then review which Mistral account plan you are on: their free-tier terms of service state that **"API requests may be used to improve our services"**, which may not be appropriate for client material.
 
 ---
 
@@ -165,7 +165,7 @@ Then the **free tier may not be appropriate** due to the terms of service statin
 
 ✅ **USPTO API Key**: Required, free, no rotation available - safeguard carefully
 
-✅ **Mistral API Key**: Optional, free tier available, paid recommended for production
+✅ **Mistral API Key**: Optional. Needed only to OCR scanned documents; a self-hosted Docling backend (`DOCLING_SERVE_URL`) is an alternative
 
 Both keys are stored securely by the deployment script using Windows DPAPI encryption for the secure configuration method.
 

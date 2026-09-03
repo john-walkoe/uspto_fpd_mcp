@@ -210,3 +210,68 @@ class TestAuthFailureLogging:
         output = stream.getvalue()
         assert "HTTP auth failed" in output
         assert presented not in output
+
+
+# --------------------------------------------------------------- F-A4 / Q-6
+
+
+class TestLoggingFacadesAreEquivalent:
+    """The content-minimization posture must not depend on which import a
+    module happened to pick.
+
+    F-A4: `UnifiedLogger` scrubbed the message and `extra` but passed
+    POSITIONAL format arguments through untouched, while
+    `util/secure_logger.SecureLogger` sanitized them. That difference is the
+    documented reason the two facades were never merged, and it meant the
+    guarantee was enforced at two strengths across 24 modules.
+    """
+
+    _SECRET = "sk-live-abcdefghijklmnopqrstuvwxyz012345"
+
+    def _capture(self, logger_factory, name):
+        import io
+        import logging
+
+        stream = io.StringIO()
+        handler = logging.StreamHandler(stream)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        underlying = logging.getLogger(name)
+        underlying.handlers = [handler]
+        underlying.propagate = False
+        underlying.setLevel(logging.DEBUG)
+
+        logger = logger_factory(name)
+        logger.warning("resolved key %s for caller", self._SECRET)
+        handler.flush()
+        underlying.handlers = []
+        return stream.getvalue()
+
+    def test_unified_logger_sanitizes_positional_arguments(self):
+        from fpd_mcp.shared.unified_logging import get_logger
+
+        output = self._capture(get_logger, "fpd_mcp.test.unified_args")
+
+        assert self._SECRET not in output
+
+    def test_secure_logger_sanitizes_positional_arguments(self):
+        from fpd_mcp.util.secure_logger import get_secure_logger
+
+        output = self._capture(get_secure_logger, "fpd_mcp.test.secure_args")
+
+        assert self._SECRET not in output
+
+    def test_the_consolidation_docstring_is_not_a_false_claim(self):
+        """It asserted the five modules were eliminated; they were not."""
+        from fpd_mcp.shared import unified_logging
+
+        doc = unified_logging.__doc__ or ""
+        assert "eliminating duplication across 5 separate logging modules" not in doc
+        assert "consolidated the" in doc.replace("\n", " ")
+
+    def test_the_auth_store_no_longer_uses_the_raw_stdlib_logger(self):
+        import inspect
+
+        from fpd_mcp.auth import store
+
+        source = inspect.getsource(store)
+        assert "logging.getLogger(__name__)" not in source

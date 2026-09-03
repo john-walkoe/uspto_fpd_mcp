@@ -1,6 +1,32 @@
 # Final Petition Decisions MCP Field Configuration
 # Progressive Workflow: Minimal → User Selection → Balanced → Document Analysis
 # Customize field sets by uncommenting fields you want (remove the # symbol)
+#
+# ---------------------------------------------------------------------------
+# PROVENANCE (how the facts in this file are known)
+# ---------------------------------------------------------------------------
+# Verified:  2026-08-21, re-probed 2026-08-30
+# Probe:     FPD_Search_petitions_minimal (this repo's client) against
+#            https://api.uspto.gov/api/v1/petition/decisions
+# Live baseline observed:
+#   - Corpus size: ~7,500 petition decision records and GROWING (7,473 on
+#     2026-08-21, 7,489 on 2026-08-30; a petitionMailDate window of
+#     1990-01-01..today returns the same count as no date filter). Treat any
+#     count written here as a floor, not a current fact.
+#   - decisionTypeCodeDescriptionText is overwhelmingly "DENIED", but GRANTED
+#     and DISMISSED records both exist (2 and 6 respectively on 2026-08-30).
+#     An earlier note here called the corpus DENIED-only on the strength of
+#     one GRANTED probe returning 0; that was wrong nine days later.
+#   - petitionMailDate values reach back to at least 2005 (sampled records:
+#     2005-04-20 and 2009-05-13), so this is not a recent-only dataset.
+#   - The API omits null fields instead of returning them as null: 2 of the 8
+#     uncommented minimal fields (patentNumber, firstApplicantName) were
+#     absent from both sampled records. A field missing from a record is
+#     normal sparsity, not a wrong field name.
+# NOT probed: whether the commented-out candidate fields below exist on the
+#   endpoint. They are offered as customization options, not as verified
+#   fields — uncomment and check the response before relying on one.
+# ---------------------------------------------------------------------------
 
 version: "1.0"
 description: "Final Petition Decisions MCP Field Configuration - Progressive workflow for petition analysis"
@@ -20,11 +46,11 @@ predefined_sets:
       - finalDecidingOfficeName            # Office that decided
 
       # === ADDITIONAL FIELDS (UNCOMMENT TO ADD) ===
-      # - decisionPetitionTypeCode          # Petition type code (551, etc.)
+      # - decisionPetitionTypeCode          # Petition type code (501/502 revival, 551 PTA correction, ...)
       # - decisionPetitionTypeCodeDescriptionText  # Petition type description
       # - groupArtUnitNumber                # Art unit number (→ PFW cross-ref)
       # - technologyCenter                  # Technology center
-      # - businessEntityStatusCategory      # Small/Undiscounted
+      # - businessEntityStatusCategory      # Small / Micro / Regular Undiscounted
       # - prosecutionStatusCodeDescriptionText  # Prosecution status
       # - inventionTitle                    # Patent title
 
@@ -59,7 +85,7 @@ predefined_sets:
       - finalDecidingOfficeName
 
       # === ADDITIONAL BALANCED FIELDS ===
-      - decisionPetitionTypeCode           # Petition type code (551, etc.)
+      - decisionPetitionTypeCode           # Petition type code (501/502 revival, 551 PTA correction, ...)
       - decisionPetitionTypeCodeDescriptionText  # Petition type description
       - groupArtUnitNumber                 # Art unit (→ PFW cross-ref)
       - technologyCenter                   # TC context
@@ -88,8 +114,8 @@ context_settings:
 
 # Usage Instructions:
 # 1. PETITION SEARCHES:
-#    - Edit 'petitions_minimal' for fpd_search_petitions_minimal
-#    - Edit 'petitions_balanced' for fpd_search_petitions_balanced
+#    - Edit 'petitions_minimal' for FPD_Search_petitions_minimal
+#    - Edit 'petitions_balanced' for FPD_Search_petitions_balanced
 # 2. Uncomment fields you want by removing the # symbol
 # 3. After editing, restart Claude Desktop to reload configuration
 

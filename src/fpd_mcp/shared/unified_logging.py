@@ -1,13 +1,29 @@
 """
 Unified Logging Facade for USPTO FPD MCP
 
-This module consolidates all logging functionality into a single, cohesive interface,
-eliminating duplication across 5 separate logging modules.
+One interface over the structured, security and sanitizing loggers.
 
-Fixes Code Duplication:
-- Consolidates ~400 lines of duplicated logging/sanitization code
-- Combines functionality from:
-  * util/logging.py (API key sanitization, HTTP logging)
+F-A4 / Q-6 (initial-software-design-analyis, code-quality-metrics-standards):
+this docstring used to claim the module "consolidates all logging
+functionality into a single, cohesive interface, eliminating duplication
+across 5 separate logging modules". It did not. It consolidated the
+INTERFACE; none of the modules were removed, so the count went from five to
+six and callers have a choice of entry points. What is accurate:
+
+- 17 modules use `unified_logging.get_logger`
+- 7 use `util/secure_logger.get_secure_logger`
+- `auth/store.py` uses the raw stdlib `logging.getLogger(__name__)`
+
+That split mattered because the three enforced the content-minimization
+posture at DIFFERENT strengths: `util/secure_logger.SecureLogger` sanitizes
+positional format arguments and `UnifiedLogger` did not, which is the reason
+recorded in `util/secure_logger.py` for rejecting the consolidation. The two
+are equivalent now (see `_sanitize_call` below), so which import a module
+happened to pick no longer changes the guarantee. The real backstop remains
+the sink-level `SanitizingFilter` attached to every handler in
+`config/log_config.py`.
+
+Wraps:
   * util/secure_logger.py (SecureLogger wrapper)
   * shared/structured_logging.py (StructuredLogger, PerformanceTimer)
   * shared/security_logger.py (SecurityLogger, security events)
@@ -77,6 +93,29 @@ class UnifiedLogger:
 
     # ===== Standard Logging Methods (with automatic sanitization) =====
 
+    def _sanitize_call(self, msg, args, kwargs):
+        """Sanitize a log call's message, positional args and kwargs.
+
+        F-A4 / Q-6: the five level methods each carried their own copy of a
+        three-line sanitize-and-forward body that scrubbed the MESSAGE and
+        `extra` but passed positional format arguments through untouched.
+        `util/secure_logger.SecureLogger` does sanitize them, and that
+        difference is the documented reason the two facades were never
+        merged: the content-minimization posture was enforced at two
+        strengths depending on which import a module happened to pick.
+        """
+        safe_msg = self.sanitizer.sanitize_string(str(msg))
+        safe_args = tuple(
+            self.sanitizer.sanitize_string(arg) if isinstance(arg, str) else arg
+            for arg in args
+        )
+        safe_kwargs = dict(kwargs)
+        if 'extra' in safe_kwargs:
+            safe_kwargs['extra'] = self.sanitizer.sanitize_for_json(
+                safe_kwargs['extra']
+            )
+        return safe_msg, safe_args, safe_kwargs
+
     def debug(self, msg: str, *args, **kwargs):
         """
         Log debug message with automatic sanitization.
@@ -86,10 +125,8 @@ class UnifiedLogger:
             *args: Format arguments
             **kwargs: Additional keyword arguments (extra, exc_info, etc.)
         """
-        safe_msg = self.sanitizer.sanitize_string(str(msg))
-        if 'extra' in kwargs:
-            kwargs['extra'] = self.sanitizer.sanitize_for_json(kwargs['extra'])
-        self.logger.debug(safe_msg, *args, **kwargs)
+        safe_msg, safe_args, safe_kwargs = self._sanitize_call(msg, args, kwargs)
+        self.logger.debug(safe_msg, *safe_args, **safe_kwargs)
 
     def info(self, msg: str, *args, **kwargs):
         """
@@ -100,10 +137,8 @@ class UnifiedLogger:
             *args: Format arguments
             **kwargs: Additional keyword arguments (extra, exc_info, etc.)
         """
-        safe_msg = self.sanitizer.sanitize_string(str(msg))
-        if 'extra' in kwargs:
-            kwargs['extra'] = self.sanitizer.sanitize_for_json(kwargs['extra'])
-        self.logger.info(safe_msg, *args, **kwargs)
+        safe_msg, safe_args, safe_kwargs = self._sanitize_call(msg, args, kwargs)
+        self.logger.info(safe_msg, *safe_args, **safe_kwargs)
 
     def warning(self, msg: str, *args, **kwargs):
         """
@@ -114,10 +149,8 @@ class UnifiedLogger:
             *args: Format arguments
             **kwargs: Additional keyword arguments (extra, exc_info, etc.)
         """
-        safe_msg = self.sanitizer.sanitize_string(str(msg))
-        if 'extra' in kwargs:
-            kwargs['extra'] = self.sanitizer.sanitize_for_json(kwargs['extra'])
-        self.logger.warning(safe_msg, *args, **kwargs)
+        safe_msg, safe_args, safe_kwargs = self._sanitize_call(msg, args, kwargs)
+        self.logger.warning(safe_msg, *safe_args, **safe_kwargs)
 
     def error(self, msg: str, *args, **kwargs):
         """
@@ -128,10 +161,8 @@ class UnifiedLogger:
             *args: Format arguments
             **kwargs: Additional keyword arguments (extra, exc_info, etc.)
         """
-        safe_msg = self.sanitizer.sanitize_string(str(msg))
-        if 'extra' in kwargs:
-            kwargs['extra'] = self.sanitizer.sanitize_for_json(kwargs['extra'])
-        self.logger.error(safe_msg, *args, **kwargs)
+        safe_msg, safe_args, safe_kwargs = self._sanitize_call(msg, args, kwargs)
+        self.logger.error(safe_msg, *safe_args, **safe_kwargs)
 
     def critical(self, msg: str, *args, **kwargs):
         """
@@ -142,10 +173,8 @@ class UnifiedLogger:
             *args: Format arguments
             **kwargs: Additional keyword arguments (extra, exc_info, etc.)
         """
-        safe_msg = self.sanitizer.sanitize_string(str(msg))
-        if 'extra' in kwargs:
-            kwargs['extra'] = self.sanitizer.sanitize_for_json(kwargs['extra'])
-        self.logger.critical(safe_msg, *args, **kwargs)
+        safe_msg, safe_args, safe_kwargs = self._sanitize_call(msg, args, kwargs)
+        self.logger.critical(safe_msg, *safe_args, **safe_kwargs)
 
     def exception(self, msg: str, *args, **kwargs):
         """
@@ -156,11 +185,9 @@ class UnifiedLogger:
             *args: Format arguments
             **kwargs: Additional keyword arguments (extra, etc.)
         """
-        safe_msg = self.sanitizer.sanitize_string(str(msg))
-        if 'extra' in kwargs:
-            kwargs['extra'] = self.sanitizer.sanitize_for_json(kwargs['extra'])
-        kwargs.setdefault('exc_info', True)
-        self.logger.error(safe_msg, *args, **kwargs)
+        safe_msg, safe_args, safe_kwargs = self._sanitize_call(msg, args, kwargs)
+        safe_kwargs.setdefault('exc_info', True)
+        self.logger.error(safe_msg, *safe_args, **safe_kwargs)
 
     # ===== Structured Logging Methods =====
 

@@ -33,37 +33,23 @@ class FeatureFlags:
     def __init__(self):
         """Initialize feature flags from environment variables"""
 
+        # F-E6: fifteen of the seventeen flags declared here had no reader
+        # anywhere in src/. The two that work are the OCR gates below. The
+        # rest were removed rather than left declared: an operator who set
+        # FPD_MAINTENANCE_MODE=true during an incident got a CRITICAL log line
+        # asserting an action that did not happen and a fully live server,
+        # which is worse than having no switch at all.
+        #
+        # maintenance_mode is KEPT and is now wired for real, at registration
+        # time in tools/__init__.py::register_all — the FPD_ENABLE_* idiom
+        # this repo already uses for the admin tool and the prompts.
         self.flags = {
-            # Core features (critical - should rarely be disabled)
-            "search_enabled": self._get_flag("FPD_SEARCH_ENABLED", True),
-            "petition_details_enabled": self._get_flag("FPD_PETITION_DETAILS_ENABLED", True),
-            "document_download_enabled": self._get_flag("FPD_DOCUMENT_DOWNLOAD_ENABLED", True),
-
-            # Optional features (can be disabled during incidents)
+            # OCR tiers (both read by services/document_extraction.py)
             "ocr_enabled": self._get_flag("FPD_OCR_ENABLED", True),
             "mistral_ocr_enabled": self._get_flag("FPD_MISTRAL_OCR_ENABLED", True),
-            "pypdf2_extraction_enabled": self._get_flag("FPD_PYPDF2_EXTRACTION_ENABLED", True),
 
-            # Infrastructure features
-            "cache_enabled": self._get_flag("FPD_CACHE_ENABLED", True),
-            "rate_limiting_enabled": self._get_flag("FPD_RATE_LIMITING_ENABLED", True),
-            "circuit_breaker_enabled": self._get_flag("FPD_CIRCUIT_BREAKER_ENABLED", True),
-
-            # Proxy and networking
-            "proxy_downloads_enabled": self._get_flag("FPD_PROXY_DOWNLOADS_ENABLED", True),
-            "centralized_proxy_enabled": self._get_flag("FPD_CENTRALIZED_PROXY_ENABLED", True),
-
-            # Advanced features
-            "field_filtering_enabled": self._get_flag("FPD_FIELD_FILTERING_ENABLED", True),
-            "prompt_templates_enabled": self._get_flag("FPD_PROMPT_TEMPLATES_ENABLED", True),
-
-            # Monitoring and observability
-            "metrics_enabled": self._get_flag("FPD_METRICS_ENABLED", True),
-            "detailed_logging_enabled": self._get_flag("FPD_DETAILED_LOGGING_ENABLED", True),
-
-            # Emergency kill switches
-            "maintenance_mode": self._get_flag("FPD_MAINTENANCE_MODE", False),  # Defaults to OFF
-            "read_only_mode": self._get_flag("FPD_READ_ONLY_MODE", False),  # Defaults to OFF
+            # Emergency kill switch (read by tools/__init__.py::register_all)
+            "maintenance_mode": self._get_flag("FPD_MAINTENANCE_MODE", False),
         }
 
         # Log feature flag status at startup
@@ -77,10 +63,10 @@ class FeatureFlags:
 
         # Log maintenance mode prominently
         if self.flags.get("maintenance_mode"):
-            logger.critical("⚠️  MAINTENANCE MODE ENABLED - Service may be degraded")
+            logger.critical(
+                "MAINTENANCE MODE ENABLED - only FPD_get_guidance is registered"
+            )
 
-        if self.flags.get("read_only_mode"):
-            logger.warning("📖 READ-ONLY MODE ENABLED - Write operations disabled")
 
     def _get_flag(self, env_var: str, default: bool) -> bool:
         """

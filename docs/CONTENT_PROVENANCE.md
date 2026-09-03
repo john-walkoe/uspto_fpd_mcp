@@ -35,7 +35,7 @@ paraphrases, or filters document content.
 ## What we do instead: structured, provenance-aware interfaces
 
 1. **Data/instruction separation by labeling.** The text-bearing tool
-   (`FPD_get_document_content_with_mistral_ocr`) attaches a machine-readable
+   (`FPD_get_document_content_with_ocr`) attaches a machine-readable
    `provenance_note` to every successful response stating that the extracted
    text is quoted data, not instructions, and the server-level instructions
    direct the consuming model to report instruction-like language found inside

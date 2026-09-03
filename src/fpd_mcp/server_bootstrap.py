@@ -1,17 +1,17 @@
 """Server bootstrap: proxy lifecycle + transport entry points (SD-1 split).
 
 Owns the background download-proxy task (start, supervision, health), PFW
-centralized-proxy detection, and the stdio/HTTP entry points. Imports the
-composition root lazily inside functions — main.py imports this module for
-its entry-point re-exports. Extracted from main.py (mechanical
-decomposition, no behavior change).
+centralized-proxy detection, and the stdio/HTTP entry points. The composed
+server comes from server_app.get_server() — this module used to read
+main.mcp through three function-local `from . import main` imports, which
+made main <-> server_bootstrap a real import cycle (F-A1). Extracted from
+main.py (mechanical decomposition, no behavior change).
 """
 
 import asyncio
 import os
 import re
-import sys
-from typing import Optional
+from typing import Any, Optional
 
 from .middleware import (
     APIKeyAuthMiddleware,
@@ -19,6 +19,8 @@ from .middleware import (
     _StreamableHTTPProbeMiddleware,
 )
 from .runtime import config_path, settings
+from .shared.body_limit import BodySizeLimitMiddleware
+from .server_app import get_auth_provider, get_server
 from .util.secure_logger import get_secure_logger
 
 logger = get_secure_logger(__name__)
@@ -32,6 +34,19 @@ _proxy_startup_lock = asyncio.Lock()  # Prevents concurrent proxy startup attemp
 # =============================================================================
 # Utility Functions
 # =============================================================================
+
+def _port_in_use(port: int, host: str = "127.0.0.1") -> bool:
+    """True if something is already listening on (host, port).
+
+    F-A8: the same three-line socket probe was written verbatim in
+    _ensure_proxy_server_running and run_hybrid_server. One helper, and a
+    seam tests can patch (testing-implementation T-1).
+    """
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        return sock.connect_ex((host, port)) == 0
+
 
 def get_local_proxy_port() -> int:
     """
@@ -81,10 +96,17 @@ def handle_async_exception(loop, context):
     else:
         logger.error(f"🔥 Unhandled async exception: {message}")
 
-    # Re-raise critical exceptions
+    # F-E11: this used to call sys.exit(1), which raises SystemExit INSIDE
+    # the loop's exception handler, where the loop swallows it. The process
+    # did not exit and the "shutting down" line asserted something that had
+    # not happened. Stopping the loop is what actually unwinds the server;
+    # the caller's own exit path then runs.
     if isinstance(exception, (KeyboardInterrupt, SystemExit)):
-        logger.critical("Critical exception - shutting down")
-        sys.exit(1)
+        logger.critical("Critical exception - stopping the event loop")
+        try:
+            asyncio.get_running_loop().stop()
+        except RuntimeError:
+            logger.error("No running loop to stop; the process may hang")
 
 
 def install_async_exception_handler():
@@ -136,6 +158,21 @@ async def _ensure_proxy_server_running(port: int = 8081):
         if _proxy_server_running:
             return True
 
+        # If the port is already serving (HTTP mode starts the proxy in a
+        # background thread that never sets _proxy_server_running; Claude
+        # Desktop may also hold a copy), adopt it instead of double-binding.
+        # Without this, uvicorn's bind failure calls sys.exit(1) and the
+        # SystemExit takes down the whole MCP server mid tool-call. Mirrors
+        # PFW's _ensure_proxy_server_running port check.
+        if _port_in_use(port):
+            logger.info(
+                "Port %d already in use — skipping proxy server startup "
+                "(another instance is running; MCP tools are still fully available)",
+                port,
+            )
+            _proxy_server_running = True  # treat as running so tools work
+            return True
+
         try:
             logger.info(f"📦 On-demand proxy startup: Starting local proxy on port {port}")
 
@@ -143,21 +180,37 @@ async def _ensure_proxy_server_running(port: int = 8081):
             async def safe_proxy_runner():
                 try:
                     await _run_proxy_server(port)
-                except Exception as e:
+                except asyncio.CancelledError:
+                    raise
+                except BaseException as e:
+                    # BaseException, not Exception: uvicorn startup failure
+                    # raises SystemExit, which must not kill the server.
                     logger.error(f"Proxy server crashed: {e}", exc_info=True)
                     global _proxy_server_running
                     _proxy_server_running = False
 
             _proxy_server_task = asyncio.create_task(safe_proxy_runner())
+            # F-D7: the always-on path attached this callback and the
+            # on-demand path did not, so an on-demand proxy that exited
+            # cleanly-but-unexpectedly left _proxy_server_running stuck True —
+            # exactly the failure _on_proxy_task_done's docstring describes.
+            _proxy_server_task.add_done_callback(_on_proxy_task_done)
             _proxy_server_running = True
 
             # Brief wait to ensure server starts cleanly
             await asyncio.sleep(0.5)
 
-            # Health check: Verify proxy is responding
+            # Health check: Verify proxy is responding.
+            # F-E5: this was a BLOCKING requests.get inside an async function,
+            # held under _proxy_startup_lock, so it stalled the whole event
+            # loop (in stdio hybrid mode that is the MCP server, the proxy and
+            # every in-flight tool call) for up to a second. httpx is already
+            # a dependency and has an async client.
             try:
-                import requests
-                response = requests.get(f"http://localhost:{port}/", timeout=1.0)
+                import httpx as _httpx
+
+                async with _httpx.AsyncClient(timeout=1.0) as _probe_client:
+                    response = await _probe_client.get(f"http://localhost:{port}/")
                 if response.status_code == 200:
                     logger.info(f"✅ On-demand proxy started successfully on port {port}")
                     return True
@@ -196,18 +249,39 @@ def _on_proxy_task_done(task: "asyncio.Task") -> None:
         logger.warning("Proxy server task exited unexpectedly (no exception)")
 
 
-async def _run_proxy_server(port: int = 8081):
+async def _run_proxy_server(port: int = 8081, share_client: bool = True):
     """Run the FastAPI proxy server
 
-    Uses API key from Settings (which may come from secure storage or environment variables)
+    Uses API key from Settings (which may come from secure storage or
+    environment variables).
+
+    F-D1: `share_client` hands the proxy the process's existing FPDClient so
+    the two paths share one bulkhead, one circuit breaker and one cache. It is
+    only safe when the proxy runs in the SAME event loop as the MCP server —
+    true on the stdio hybrid path, false in HTTP mode where the proxy gets its
+    own loop in a background thread and the asyncio locks cannot cross.
     """
     try:
         import uvicorn
         from .proxy.server import create_proxy_app
 
+        shared = None
+        if share_client:
+            from .runtime import get_api_client
+
+            shared = get_api_client()
+        else:
+            logger.info(
+                "Proxy runs in its own event loop: it builds a SECOND "
+                "FPDClient, so the USPTO concurrency bulkhead and circuit "
+                "breaker are per-loop, not per-process"
+            )
+
         # Pass API key and port from Settings to proxy server
         # This allows proxy to work with secure storage (Windows DPAPI)
-        app = create_proxy_app(api_key=settings.uspto_api_key, port=port)
+        app = create_proxy_app(
+            api_key=settings.uspto_api_key, port=port, client=shared
+        )
         config = uvicorn.Config(
             app,
             host="127.0.0.1",
@@ -236,8 +310,7 @@ async def run_hybrid_server(enable_always_on: bool = True, proxy_port: int = 808
     try:
         global _proxy_server_running, _proxy_server_task
 
-        from . import main as _main  # lazy: composition root imports us
-        mcp = _main.mcp
+        mcp = get_server()
 
         # Start both servers concurrently
         logger.info("Starting hybrid FPD MCP + HTTP proxy server")
@@ -249,11 +322,7 @@ async def run_hybrid_server(enable_always_on: bool = True, proxy_port: int = 808
 
         # Start proxy server immediately if always-on mode is enabled
         if enable_always_on:
-            import socket
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                port_free = s.connect_ex(("127.0.0.1", proxy_port)) != 0
-
-            if not port_free:
+            if _port_in_use(proxy_port):
                 logger.info(
                     "Port %d already in use — skipping proxy server startup "
                     "(another instance is running; MCP tools are still fully available)",
@@ -292,7 +361,7 @@ def _log_pfw_proxy_standalone_mode() -> None:
     logger.info("      - Persistent download links (7-day encrypted URLs)")
     logger.info("      - Centralized proxy (unified rate limiting)")
     logger.info("      - Cross-MCP document sharing and caching")
-    logger.info("   📦 Get it at: https://github.com/johnwalkoe/patent_filewrapper_mcp")
+    logger.info("   📦 Get it at: https://github.com/john-walkoe/uspto_pfw_mcp")
 
 
 def _log_pfw_proxy_detected(port: int, suffix: str = "") -> None:
@@ -310,19 +379,40 @@ def _try_explicit_centralized_port(centralized_port_env: str) -> Optional[int]:
     """CENTRALIZED_PROXY_PORT set to an explicit numeric port: try it first.
     Extracted from _detect_pfw_proxy (mechanical decomposition, no behavior
     change)."""
-    import requests
-
     if not centralized_port_env.isdigit():
         return None
     explicit_port = int(centralized_port_env)
-    try:
-        response = requests.get(f"http://localhost:{explicit_port}/", timeout=0.3)
-        if response.status_code == 200:
-            _log_pfw_proxy_detected(explicit_port, " (via CENTRALIZED_PROXY_PORT)")
-            return explicit_port
-    except Exception:
-        logger.warning(f"   ⚠️  CENTRALIZED_PROXY_PORT={explicit_port} set but proxy not responding")
+    if _proxy_responds(explicit_port, 0.3):
+        _log_pfw_proxy_detected(explicit_port, " (via CENTRALIZED_PROXY_PORT)")
+        return explicit_port
+    logger.warning(
+        f"   CENTRALIZED_PROXY_PORT={explicit_port} set but proxy not responding"
+    )
     return None
+
+
+#: Ports probed for a sibling PFW centralized proxy: the primary first, the
+#: alternatives only on the final attempt (to keep startup fast when PFW is
+#: not installed).
+PFW_PRIMARY_PROXY_PORT = 8080
+PFW_ALTERNATIVE_PROXY_PORTS = (8079, 8082, 8083)
+
+
+def _proxy_responds(port: int, timeout: float) -> bool:
+    """True if something answers 200 on localhost:port.
+
+    Extracted as the single seam this module's HTTP probing goes through
+    (F-A8, testing-implementation T-1): the retry logic above it is pure
+    logic once this is patchable.
+    """
+    import requests
+
+    try:
+        return requests.get(
+            f"http://localhost:{port}/", timeout=timeout
+        ).status_code == 200
+    except Exception:
+        return False
 
 
 def _probe_pfw_proxy_ports(max_retries: int, retry_delay: float, timeout: float) -> Optional[int]:
@@ -331,33 +421,25 @@ def _probe_pfw_proxy_ports(max_retries: int, retry_delay: float, timeout: float)
     startup delay). Extracted from _detect_pfw_proxy (mechanical
     decomposition, no behavior change)."""
     import time
-    import requests
 
     for attempt in range(max_retries):
         if attempt > 0:
             logger.info(f"   Retry {attempt}/{max_retries-1} (waiting for PFW proxy to start)...")
+            # Startup-only, and this function is called from sync code
+            # (_detect_pfw_proxy) before the loop exists, so a blocking sleep
+            # is correct here — unlike the async health check above (F-E5).
             time.sleep(retry_delay)
 
-        # Check if PFW proxy is running on port 8080 (primary port)
-        try:
-            pfw_port = 8080
-            response = requests.get(f"http://localhost:{pfw_port}/", timeout=timeout)
-            if response.status_code == 200:
-                _log_pfw_proxy_detected(pfw_port)
-                return pfw_port
-        except Exception:
-            pass
+        if _proxy_responds(PFW_PRIMARY_PROXY_PORT, timeout):
+            _log_pfw_proxy_detected(PFW_PRIMARY_PROXY_PORT)
+            return PFW_PRIMARY_PROXY_PORT
 
         # Only check alternative ports on final attempt (to minimize startup delay)
         if attempt == max_retries - 1:
-            for alt_port in [8079, 8082, 8083]:
-                try:
-                    response = requests.get(f"http://localhost:{alt_port}/", timeout=timeout)
-                    if response.status_code == 200:
-                        _log_pfw_proxy_detected(alt_port)
-                        return alt_port
-                except Exception:
-                    continue
+            for alt_port in PFW_ALTERNATIVE_PROXY_PORTS:
+                if _proxy_responds(alt_port, timeout):
+                    _log_pfw_proxy_detected(alt_port)
+                    return alt_port
 
     return None
 
@@ -427,9 +509,8 @@ def _run_http_transport() -> None:
     """HTTP-mode server startup — Docker, reverse proxy, or claude.ai direct
     connector. Extracted from run_server verbatim (mechanical
     decomposition, no behavior change)."""
-    from . import main as _main  # composition root (lazy: avoids circular import)
-    mcp = _main.mcp
-    _AUTH_PROVIDER = _main._AUTH_PROVIDER
+    mcp = get_server()
+    _AUTH_PROVIDER = get_auth_provider()
 
     # Fail fast if INTERNAL_AUTH_SECRET is missing — open-access HTTP is a
     # misconfiguration. In STDIO mode this is fine (local process only).
@@ -458,12 +539,23 @@ def _run_http_transport() -> None:
         # Middleware stack (outermost first): Probe → SecurityHeaders → APIKeyAuth → CORS → mcp app
         # Probe must be outermost — intercepts claude.ai format probes before auth runs.
         # Security headers wrap everything so they appear on 401 responses too.
-        inner = CORSMiddleware(
-            mcp.http_app(),
+        inner: Any = CORSMiddleware(
+            mcp.http_app(stateless_http=settings.fastmcp_stateless_http),
             allow_origins=origins,
             allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
             allow_headers=["Content-Type", "Accept", "Mcp-Session-Id"],
             expose_headers=["Mcp-Session-Id"],
+        )
+        # M-2: nothing capped a /mcp POST body. uvicorn/h11 bound the
+        # request line and headers; the body was unbounded once authenticated.
+        # FPD_MAX_MCP_BODY_BYTES (default 4 MB) is generous for a JSON-RPC
+        # frame and finite, which the previous state was not.
+        inner = BodySizeLimitMiddleware(
+            inner,
+            max_body_bytes=int(
+                os.getenv("FPD_MAX_MCP_BODY_BYTES", str(4 * 1024 * 1024))
+            ),
+            error_body={"error": "Request body too large"},
         )
         if _AUTH_PROVIDER is not None:
             # OAuth mode: FastMCP's bearer middleware guards /mcp (401
@@ -477,7 +569,7 @@ def _run_http_transport() -> None:
                 "FPD_AUTH_MODE=oauth: x-api-key guard and probe shim "
                 "disabled; the MCP surface is protected by bearer tokens."
             )
-            app = SecurityHeadersMiddleware(inner)
+            app: Any = SecurityHeadersMiddleware(inner)
         else:
             app = _StreamableHTTPProbeMiddleware(
                 SecurityHeadersMiddleware(APIKeyAuthMiddleware(inner))
@@ -491,7 +583,9 @@ def _run_http_transport() -> None:
             import threading
 
             def _proxy_thread_target():
-                asyncio.run(_run_proxy_server(_proxy_port_http))
+                # F-D1: separate thread, separate event loop — the shared
+                # client's asyncio primitives cannot cross it.
+                asyncio.run(_run_proxy_server(_proxy_port_http, share_client=False))
             _pt = threading.Thread(target=_proxy_thread_target, daemon=True, name="download-proxy")
             _pt.start()
             logger.info(f"Download proxy server starting on port {_proxy_port_http} (background thread)")
@@ -528,8 +622,7 @@ def _run_stdio_transport() -> None:
         asyncio.run(run_hybrid_server(enable_always_on=enable_always_on, proxy_port=default_port))
     else:
         logger.info("Proxy server disabled via ENABLE_PROXY_SERVER=false")
-        from . import main as _main  # lazy: composition root imports us
-        _main.mcp.run()
+        get_server().run()
 
 
 # ==========================================
@@ -558,6 +651,14 @@ def run_server():
     try:
         # Install global async exception handler FIRST
         install_async_exception_handler()
+
+        # F-A3: a .env is loaded HERE, at a deliberate entry point, rather
+        # than as a side effect of importing proxy/server.py. Importing a
+        # tool module used to be enough to read a .env found by walking up
+        # from the package directory — outside the repo, with no log line.
+        from .proxy.server import load_env_file
+
+        load_env_file()
 
         logger.info("Starting Final Petition Decisions MCP server...")
         logger.info(f"Field config loaded from: {config_path.name}")

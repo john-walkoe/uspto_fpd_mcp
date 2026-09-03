@@ -16,6 +16,24 @@ from pathlib import Path
 from ..shared.log_sanitizer import SanitizingFilter
 
 
+class _ModeRotatingFileHandler(logging.handlers.RotatingFileHandler):
+    """RotatingFileHandler that re-applies 0600 on every rollover.
+
+    M-22: the chmod below runs once, at startup, against the file that exists
+    then. On rollover the handler creates a fresh base file with the process
+    umask (0644 in the container), so the audit trail lost its permissions the
+    first time it filled up — silently, and permanently thereafter.
+    """
+
+    def _open(self):
+        stream = super()._open()
+        try:
+            os.chmod(self.baseFilename, 0o600)
+        except OSError:
+            pass
+        return stream
+
+
 def setup_logging(log_level: str = "INFO"):
     """
     Configure logging for FPD MCP with file-based audit trail.
@@ -48,7 +66,7 @@ def setup_logging(log_level: str = "INFO"):
 
     # Application log file with rotation
     app_log_file = logs_dir / "fpd_mcp.log"
-    file_handler = logging.handlers.RotatingFileHandler(
+    file_handler = _ModeRotatingFileHandler(
         app_log_file,
         maxBytes=max_bytes,
         backupCount=backup_count,
@@ -60,7 +78,7 @@ def setup_logging(log_level: str = "INFO"):
 
     # Security log file with rotation (10MB max, 10 backups for compliance)
     security_log_file = logs_dir / "security.log"
-    security_handler = logging.handlers.RotatingFileHandler(
+    security_handler = _ModeRotatingFileHandler(
         security_log_file,
         maxBytes=10 * 1024 * 1024,  # 10MB
         backupCount=10,  # Keep more security logs for compliance
@@ -92,8 +110,12 @@ def setup_logging(log_level: str = "INFO"):
     root_logger.addHandler(file_handler)
     root_logger.addHandler(console_handler)
 
-    # Configure security logger (separate file, WARNING and above)
-    security_logger = logging.getLogger('security')
+    # Configure security logger (separate file, WARNING and above).
+    # The name must match the producer in shared/security_logger.py, which
+    # emits on 'fpd_mcp.security'. 'security' is a sibling of that logger in
+    # the hierarchy, not an ancestor, so binding this handler to 'security'
+    # meant security.log was created, chmod'd and never written to.
+    security_logger = logging.getLogger('fpd_mcp.security')
     security_logger.addHandler(security_handler)
     security_logger.setLevel(logging.WARNING)
     security_logger.propagate = False  # Don't duplicate to other handlers
@@ -117,4 +139,9 @@ def setup_logging(log_level: str = "INFO"):
     # /download/persistent/{hash} paths embed the link credential
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
+    # FastMCP 4 dropped httpx for its vendored fork, which logs under the
+    # httpx2/httpcore2 names — the httpx caps above no longer reach it, and an
+    # INFO-level httpx2 request line carries the full URL.
+    logging.getLogger("httpx2").setLevel(logging.WARNING)
+    logging.getLogger("httpcore2").setLevel(logging.WARNING)
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)

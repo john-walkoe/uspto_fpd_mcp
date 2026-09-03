@@ -513,7 +513,7 @@ if ($updateKeys -eq $true -or $updateKeys -eq "mistral_only") {
         # Special case: Only adding Mistral key, USPTO already exists
         Write-Host ""
         Write-Host "[INFO] Mistral API key is OPTIONAL (for OCR on scanned petition documents)" -ForegroundColor Yellow
-        Write-Host "       Without it, you can still use free PyPDF2 extraction for text-based PDFs" -ForegroundColor Yellow
+        Write-Host "       Without it, text-layer PDFs are still extracted directly with pypdf" -ForegroundColor Yellow
         Write-Host ""
         $mistralApiKey = Read-MistralApiKeyWithValidation
         if ($null -eq $mistralApiKey) {
@@ -540,7 +540,7 @@ if ($updateKeys -eq $true -or $updateKeys -eq "mistral_only") {
     } else {
         Write-Host ""
         Write-Host "[INFO] Mistral API key is OPTIONAL (for OCR on scanned petition documents)" -ForegroundColor Yellow
-        Write-Host "       Without it, you can still use free PyPDF2 extraction for text-based PDFs" -ForegroundColor Yellow
+        Write-Host "       Without it, text-layer PDFs are still extracted directly with pypdf" -ForegroundColor Yellow
         Write-Host ""
 
         $mistralApiKey = Read-MistralApiKeyWithValidation
@@ -614,7 +614,7 @@ if ($hasPfwMcp -eq "y" -or $hasPfwMcp -eq "Y") {
 } else {
     Write-Host "[INFO] FPD will run in standalone mode with local proxy (always-on)" -ForegroundColor Yellow
     Write-Host "       Install USPTO PFW MCP later for enhanced features:" -ForegroundColor Cyan
-    Write-Host "       https://github.com/johnwalkoe/patent_filewrapper_mcp" -ForegroundColor Cyan
+    Write-Host "       https://github.com/john-walkoe/uspto_pfw_mcp" -ForegroundColor Cyan
     $useCentralizedProxy = $false
 }
 
@@ -1041,7 +1041,7 @@ if ($finalKeys.MISTRAL) {
     Write-Host "  [OK] Mistral API Key: Stored in DPAPI encrypted storage" -ForegroundColor Green
     Write-Host "       Location: ~/.mistral_api_key (DPAPI encrypted + hidden)" -ForegroundColor Yellow
 } else {
-    Write-Host "  [INFO] Mistral API Key: Not set (PyPDF2 fallback for text PDFs)" -ForegroundColor Yellow
+    Write-Host "  [INFO] Mistral API Key: Not set (pypdf text-layer extraction only)" -ForegroundColor Yellow
 }
 
 Write-Host ""
@@ -1068,14 +1068,15 @@ Write-Host "  [*] Hidden file attributes applied to key files" -ForegroundColor 
 Write-Host "  [*] Audit logging enabled (~/.uspto_mcp_audit.log)" -ForegroundColor White
 Write-Host ""
 
-Write-Host "Available Tools (7):" -ForegroundColor Cyan
-Write-Host "  - fpd_search_petitions_minimal (ultra-fast discovery)" -ForegroundColor White
-Write-Host "  - fpd_search_petitions_balanced (detailed analysis)" -ForegroundColor White
-Write-Host "  - fpd_search_by_art_unit (art unit quality)" -ForegroundColor White
-Write-Host "  - fpd_search_by_application (petition history)" -ForegroundColor White
-Write-Host "  - fpd_get_petition_details (full details)" -ForegroundColor White
-Write-Host "  - fpd_get_document_download (PDF downloads)" -ForegroundColor White
-Write-Host "  - fpd_get_tool_reflections (workflow guidance)" -ForegroundColor White
+Write-Host "Available Tools (8):" -ForegroundColor Cyan
+Write-Host "  - FPD_Search_petitions_minimal (ultra-fast discovery)" -ForegroundColor White
+Write-Host "  - FPD_Search_petitions_balanced (detailed analysis)" -ForegroundColor White
+Write-Host "  - FPD_Search_petitions_by_art_unit (art unit quality)" -ForegroundColor White
+Write-Host "  - FPD_Search_petitions_by_application (petition history)" -ForegroundColor White
+Write-Host "  - FPD_Get_petition_details (full details)" -ForegroundColor White
+Write-Host "  - FPD_get_document_download (PDF downloads)" -ForegroundColor White
+Write-Host "  - FPD_get_document_content_with_ocr (document text extraction)" -ForegroundColor White
+Write-Host "  - FPD_get_guidance (workflow guidance)" -ForegroundColor White
 Write-Host ""
 
 Write-Host "Proxy Server:" -ForegroundColor Cyan
@@ -1088,6 +1089,6 @@ Write-Host "  Manage keys: ./deploy/manage_api_keys.ps1" -ForegroundColor Yellow
 Write-Host "  Cross-MCP:   Keys shared with PFW, PTAB, and Citations MCPs" -ForegroundColor White
 Write-Host ""
 
-Write-Host "Test with: fpd_search_petitions_minimal" -ForegroundColor Yellow
-Write-Host "Learn workflows: fpd_get_tool_reflections" -ForegroundColor Yellow
+Write-Host "Test with: FPD_Search_petitions_minimal" -ForegroundColor Yellow
+Write-Host "Learn workflows: FPD_get_guidance" -ForegroundColor Yellow
 Write-Host ""

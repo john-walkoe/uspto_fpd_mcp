@@ -8,6 +8,8 @@ Default: 8081 to avoid conflicts with Patent File Wrapper MCP (port 8080).
 import asyncio
 import ipaddress
 import os
+import base64
+import hashlib
 import re
 import secrets as _secrets
 import threading
@@ -21,21 +23,60 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.background import BackgroundTask
 from starlette.middleware.base import BaseHTTPMiddleware
 import httpx
-from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
+
+def load_env_file() -> None:
+    """Load a .env into the process environment. Call from an entry point.
+
+    F-A3: this used to run at module import. Importing anything that reaches
+    `proxy/server.py` — which `tools/documents.py` does, so importing the tool
+    package is enough — silently read a `.env` found by walking UP from this
+    file's directory and rebound configuration with no log line. On a
+    developer machine that reached a `.env` in a parent directory OUTSIDE
+    the repo and injected a live USPTO_API_KEY into every process that
+    imported a tool, including the test run. Loading a .env is a deliberate
+    act and now happens only where one is intended.
+    """
+    from dotenv import load_dotenv
+
+    load_dotenv()
+
 
 from ..api.fpd_client import FPDClient
 from ..api.field_constants import FPDFields
 from .rate_limiter import rate_limiter
+from ..shared.body_limit import BodySizeLimitMiddleware
+from ..shared.client_ip import client_ip_from_request
+from ..shared.credentials import compare_credential
 from ..shared.error_utils import generate_request_id
 from ..shared.unified_logging import get_logger
+from ..shared.uspto_hosts import USPTO_KEY_EVENT_HOOKS
 
 logger = get_logger(__name__)
 
 # Request size limit configuration
 MAX_REQUEST_SIZE = 1024 * 1024  # 1MB limit
+
+
+def _max_egress_bytes() -> int:
+    """FPD_MAX_EGRESS_PDF_BYTES — cap on a proxied PDF (L-24)."""
+    raw = os.getenv("FPD_MAX_EGRESS_PDF_BYTES", "")
+    if not raw.strip():
+        return 100 * 1024 * 1024
+    try:
+        return max(1, int(raw))
+    except (TypeError, ValueError):
+        logger.warning("Invalid FPD_MAX_EGRESS_PDF_BYTES; using 100MB")
+        return 100 * 1024 * 1024
+
+
+def _download_timeout_seconds() -> float:
+    """USPTO_DOWNLOAD_TIMEOUT, shared with the extraction path."""
+    try:
+        return float(os.getenv("USPTO_DOWNLOAD_TIMEOUT", "60.0"))
+    except (TypeError, ValueError):
+        logger.warning("Invalid USPTO_DOWNLOAD_TIMEOUT; using 60.0s")
+        return 60.0
 
 # Global client instance
 api_client = None
@@ -68,7 +109,9 @@ class ProxyTokenDependency:
 
     async def __call__(self, request: Request) -> None:
         supplied = request.headers.get("X-Proxy-Token", "")
-        if not _secrets.compare_digest(supplied, _get_proxy_token()):
+        # L-1: a non-ASCII header used to raise TypeError here, turning the
+        # 401 into a 500.
+        if not compare_credential(supplied, _get_proxy_token()):
             # Log the event only — never the presented token or the path
             logger.warning("Proxy token auth failed (X-Proxy-Token missing or mismatch)")
             raise HTTPException(
@@ -129,14 +172,19 @@ def get_recent_downloads(viewer_key: Optional[str] = None,
         snapshot = list(_recent_downloads)
     results = []
     for entry in snapshot:
-        if not include_all and entry.get(_VIEWER_HASH_FIELD) != wanted:
+        # L-3: the single site in the repo comparing a secret with != rather
+        # than compare_digest. Both sides are hex digests of fixed length, so
+        # the leak is small, but there is no reason for the inconsistency.
+        if not include_all and not _secrets.compare_digest(
+            str(entry.get(_VIEWER_HASH_FIELD) or ""), str(wanted or "")
+        ):
             continue
         results.append({k: v for k, v in entry.items() if k != _VIEWER_HASH_FIELD})
     return results
 
 
-# Browser-facing downloads page (served at GET /downloads, no token — used as
-# the URL-mode elicitation target). Its fetch of /api/recent-downloads passes
+# Browser-facing downloads page (served at GET /downloads, no token — the
+# link handed to the user). Its fetch of /api/recent-downloads passes
 # the per-registrant viewer key from the page URL's ?s= param (H2: the route
 # never serves the registry anonymously; the key scopes it to the caller's
 # own entries).
@@ -183,6 +231,13 @@ const highlightId = params.get('highlight');
 const viewerKey = params.get('s') || '';
 let firstLoad = true;
 
+// M-12: registry values are USPTO-authored free text rendered with
+// innerHTML below; escape every interpolation.
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g,
+    c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
 function fmtTime(iso) {
   try {
     const d = new Date(iso); const mins = Math.floor((Date.now() - d) / 60000);
@@ -208,11 +263,11 @@ async function load() {
       div.innerHTML = `
         <div class="icon">📋</div>
         <div class="info">
-          <div class="title">${d.enhanced_filename || d.document_description || 'Document'}</div>
-          <div class="meta"><span class="badge">petition</span><span>${d.petition_id || ''}</span><span>Doc ${d.document_identifier || ''}</span></div>
+          <div class="title">${esc(d.enhanced_filename || d.document_description || 'Document')}</div>
+          <div class="meta"><span class="badge">petition</span><span>${esc(d.petition_id || '')}</span><span>Doc ${esc(d.document_identifier || '')}</span></div>
         </div>
-        <span class="ts">${fmtTime(d.registered_at)}</span>
-        <a class="btn" href="${d.download_url}">Download PDF</a>
+        <span class="ts">${esc(fmtTime(d.registered_at))}</span>
+        <a class="btn" href="${esc(d.download_url)}">Download PDF</a>
       `;
       cards.appendChild(div);
     });
@@ -295,7 +350,10 @@ def generate_enhanced_filename(
     if petition_mail_date and petition_mail_date.strip():
         # Extract just the date portion (handles ISO format with time)
         date_part = petition_mail_date.split('T')[0] if 'T' in petition_mail_date else petition_mail_date
-        components.append(f"PET-{date_part}")
+        # L-12: the upstream date lands in Content-Disposition and
+        # X-Enhanced-Filename. Its two neighbours below were routed through
+        # the allowlist sanitizer by L23; this one was missed.
+        components.append(f"PET-{sanitize_description(date_part, 20)}")
 
     # Add application number (L23: routed through the same allowlist
     # sanitizer as the description field, instead of interpolating the
@@ -325,8 +383,20 @@ async def _open_upstream_pdf_stream(download_url: str, api_key: str):
     page, HTML) becomes a clean 502 instead of being served as
     application/pdf. Returns an async generator that owns the connection.
     Raises httpx.HTTPStatusError on non-2xx, HTTPException(502) on non-PDF.
+
+    The `request` event hook drops `X-API-KEY` on any hop that is not https on
+    uspto.gov. These URLs 302 to signed storage URLs, and httpx strips only
+    `Authorization` and `Cookie` across origins, so the shared ODP key was
+    reaching the redirect target verbatim (M-16).
     """
-    client = httpx.AsyncClient(timeout=60.0, follow_redirects=True)
+    # F-R1: this was a literal 60.0, so an operator raising
+    # USPTO_DOWNLOAD_TIMEOUT for large scanned wrappers changed the extraction
+    # path and not the browser-download path served from here.
+    client = httpx.AsyncClient(
+        timeout=_download_timeout_seconds(),
+        follow_redirects=True,
+        event_hooks=USPTO_KEY_EVENT_HOOKS,
+    )
     response = None
     try:
         response = await client.send(
@@ -353,16 +423,62 @@ async def _open_upstream_pdf_stream(download_url: str, api_key: str):
         raise
 
     async def stream_body():
+        # L-24: the egress stream had a magic-byte check but no byte cap at
+        # all — the ingest path's _MAX_PDF_BYTES bounded only the extraction
+        # fetch. A pathological upstream body was proxied to the browser
+        # without limit. The stream is cut and the truncation logged; the
+        # response has already started, so there is no status code left to
+        # change.
+        cap = _max_egress_bytes()
+        streamed = 0
         try:
             if first_chunk:
+                streamed += len(first_chunk)
                 yield first_chunk
             async for chunk in iterator:
+                streamed += len(chunk)
+                if streamed > cap:
+                    logger.error(
+                        "Upstream PDF exceeded the %d-byte egress cap; "
+                        "stream truncated", cap,
+                    )
+                    return
                 yield chunk
         finally:
             await response.aclose()
             await client.aclose()
 
     return stream_body()
+
+
+def _inline_script_csp_hashes(html: str) -> str:
+    """CSP `'sha256-...'` source values for every inline <script> in `html`.
+
+    The downloads page carries an inline script and an inline <style>, and the
+    blanket `default-src 'self'` header below silently blocked both, so the
+    page rendered an empty shell. Hashes are the right fix for static markup:
+    they keep the policy closed to injected script while letting this one
+    known script run. Recomputed at import, so editing the page cannot leave a
+    stale hash behind.
+    """
+    digests = []
+    for body in re.findall(r"<script[^>]*>(.*?)</script>", html, re.DOTALL):
+        digest = hashlib.sha256(body.encode("utf-8")).digest()
+        digests.append("'sha256-" + base64.b64encode(digest).decode("ascii") + "'")
+    return " ".join(digests)
+
+
+_CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; "
+    "script-src 'self' " + _inline_script_csp_hashes(_DOWNLOADS_PAGE_HTML) + "; "
+    # The page's <style> block and its style="..." attributes are static
+    # markup in this file; no untrusted value reaches either.
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "object-src 'none'; "
+    "base-uri 'none'; "
+    "frame-ancestors 'none'"
+)
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -375,7 +491,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        response.headers["Content-Security-Policy"] = "default-src 'self'"
+        response.headers["Content-Security-Policy"] = _CONTENT_SECURITY_POLICY
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
 
@@ -416,7 +532,7 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
                 )
             if content_length > self.max_request_size:
                 # Log security event
-                client_ip = request.client.host if request.client else "unknown"
+                client_ip = client_ip_from_request(request)
                 request_id = generate_request_id()
 
                 logger.warning(
@@ -456,16 +572,30 @@ async def _periodic_link_cleanup() -> None:
             logger.warning(f"Periodic link cleanup failed: {type(e).__name__}")
 
 
-def create_lifespan(api_key: Optional[str] = None):
-    """Create lifespan context manager with API key"""
+def create_lifespan(api_key: Optional[str] = None, client: Optional["FPDClient"] = None):
+    """Create lifespan context manager with API key.
+
+    F-D1: `client` lets the caller hand in the process's existing FPDClient
+    instead of building a second one. Two instances meant two
+    `uspto_semaphore(10)` bulkheads, two `CircuitBreaker(name="USPTO_API")`
+    instances and two caches, so the concurrency bound was 20 rather than 10,
+    a breaker tripped by the tool path told the proxy path nothing, and the
+    fallback cache was written in one instance and read in the other.
+    """
+    owns_client = client is None
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         """Manage application lifespan"""
         global api_client
         cleanup_task = None
         try:
-            # Use provided API key (from secure storage) or fall back to environment variable
-            api_client = FPDClient(api_key=api_key) if api_key else FPDClient()
+            # Use the injected client when the caller shares one; otherwise
+            # build from the provided API key (or the environment).
+            if client is not None:
+                api_client = client
+            else:
+                api_client = FPDClient(api_key=api_key) if api_key else FPDClient()
             logger.info("USPTO Final Petition Decisions API client initialized for proxy server")
             cleanup_task = asyncio.create_task(_periodic_link_cleanup())
             yield
@@ -475,6 +605,11 @@ def create_lifespan(api_key: Optional[str] = None):
         finally:
             if cleanup_task is not None:
                 cleanup_task.cancel()
+            # F-R7: the client holds a pooled httpx client for its lifetime,
+            # so it gets an explicit close on shutdown — but only if this app
+            # built it. A shared client outlives the proxy.
+            if owns_client and api_client is not None:
+                await api_client.aclose()
     return lifespan
 
 
@@ -550,13 +685,15 @@ def _is_ip_allowed(client_ip: str, allowed_networks: List[Any]) -> bool:
     )
 
 
-def _require_proxy_api_client(log_message: Optional[str] = None) -> None:
-    """Raise 503 if the module-level proxy `api_client` isn't initialized
-    yet. Extracted from download_document / download_document_persistent
-    (mechanical decomposition, no behavior change) — called with a log
-    message at the two points in download_document that previously logged
-    before raising, and without one at the point in
-    download_document_persistent that previously raised silently."""
+def _require_proxy_api_client(log_message: Optional[str] = None) -> "FPDClient":
+    """Return the module-level proxy `api_client`, or raise 503.
+
+    Q-7: this returned None, so every caller then read `api_client.api_key`
+    off the module global and mypy could not prove it was non-None — two
+    [union-attr] errors, each propagating an [arg-type] into
+    _open_upstream_pdf_stream. Returning the client lets the call sites bind
+    a name mypy knows is narrowed, with no behavior change.
+    """
     if api_client is None:
         if log_message:
             logger.error(log_message)
@@ -564,6 +701,7 @@ def _require_proxy_api_client(log_message: Optional[str] = None) -> None:
             status_code=503,
             detail="Proxy server not ready - API client not initialized. Try again in a moment."
         )
+    return api_client
 
 
 def _proxy_rate_limit_response(client_ip: str) -> Optional[JSONResponse]:
@@ -735,11 +873,11 @@ async def _handle_persistent_download(link_hash: str, request: Request):
     route. Extracted from create_proxy_app (mechanical decomposition, no
     behavior change)."""
     import time as _time
-    # M5: keyed on request.client.host (the raw ASGI peer address), same
-    # loopback-only design note as the IP allowlist above — XFF is
-    # deliberately not trusted, so this is only meaningful for direct
-    # (non-reverse-proxied) callers.
-    client_ip = request.client.host if request.client else "unknown"
+    # M-1: keyed on the resolved client address. X-Forwarded-For is honored
+    # only when the peer is in FPD_TRUSTED_PROXY_IPS (empty by default, which
+    # is the previous peer-address-only behavior); behind a reverse proxy
+    # without it, every caller shared one limiter bucket.
+    client_ip = client_ip_from_request(request)
     if not rate_limiter.is_allowed(client_ip):
         remaining_time = max(1, int(rate_limiter.get_reset_time(client_ip) - _time.time()))
         return JSONResponse(
@@ -752,8 +890,19 @@ async def _handle_persistent_download(link_hash: str, request: Request):
             headers={"Retry-After": str(int(remaining_time))}
         )
 
-    from .secure_link_cache import get_link_cache
-    link_data = get_link_cache().resolve_persistent_link(link_hash)
+    from .secure_link_cache import LinkCacheUnavailable, get_link_cache
+
+    try:
+        link_data = get_link_cache().resolve_persistent_link(link_hash)
+    except LinkCacheUnavailable:
+        # F-X1: a database fault is not an expired link. Telling the user
+        # their link expired sends them to generate another one that will
+        # fail the same way.
+        raise HTTPException(
+            status_code=503,
+            detail="The download link store is temporarily unavailable. "
+                   "This link has not expired; try again shortly.",
+        )
     if not link_data:
         raise HTTPException(
             status_code=404,
@@ -776,7 +925,8 @@ async def _handle_persistent_download(link_hash: str, request: Request):
     logger.info(f"Streaming persistent download {link_hash[:8]}...: {filename}")
 
     try:
-        pdf_stream = await _open_upstream_pdf_stream(download_url, api_client.api_key)
+        client = _require_proxy_api_client()
+        pdf_stream = await _open_upstream_pdf_stream(download_url, client.api_key)
     except httpx.HTTPStatusError as e:
         logger.error(f"USPTO API error {e.response.status_code} on persistent download")
         raise HTTPException(status_code=502,
@@ -802,7 +952,7 @@ async def _handle_direct_download(petition_id: str, document_identifier: str, re
     behavior change)."""
     try:
         # Get client IP for rate limiting
-        client_ip = request.client.host if request.client else "unknown"
+        client_ip = client_ip_from_request(request)
 
         # Apply rate limiting
         rate_limited_response = _proxy_rate_limit_response(client_ip)
@@ -821,8 +971,10 @@ async def _handle_direct_download(petition_id: str, document_identifier: str, re
         )
 
         # Stream the PDF from USPTO API (magic-byte verified, L24)
-        _require_proxy_api_client("API client became None during streaming - async lifecycle issue")
-        pdf_stream = await _open_upstream_pdf_stream(download_url, api_client.api_key)
+        client = _require_proxy_api_client(
+            "API client became None during streaming - async lifecycle issue"
+        )
+        pdf_stream = await _open_upstream_pdf_stream(download_url, client.api_key)
 
         logger.info(f"Streaming PDF: {filename} ({page_count} pages)")
 
@@ -840,10 +992,20 @@ async def _handle_direct_download(petition_id: str, document_identifier: str, re
     except httpx.HTTPStatusError as e:
         raise _map_proxy_http_status_error(e, petition_id, document_identifier)
     except Exception as e:
-        logger.error(f"Proxy download failed for petition {petition_id}/{document_identifier}: {e}")
+        # L-16: the raw exception string used to go straight to the caller,
+        # bypassing the environment-gated genericization every other error
+        # path in the server goes through. The detail comes from
+        # format_error_response now; the type stays in the log.
+        logger.error(
+            f"Proxy download failed for petition {petition_id}/{document_identifier}: "
+            f"{type(e).__name__}",
+            exc_info=True,
+        )
+        from ..shared.error_utils import format_error_response
+
         raise HTTPException(
             status_code=500,
-            detail=f"Download failed: {str(e)}"
+            detail=format_error_response(f"Download failed: {e}", 500)["error"],
         )
 
 
@@ -889,7 +1051,7 @@ def _handle_recent_downloads(request: Request) -> Dict[str, Any]:
     entries only).
     """
     supplied_token = request.headers.get("X-Proxy-Token", "")
-    if supplied_token and _secrets.compare_digest(supplied_token, _get_proxy_token()):
+    if compare_credential(supplied_token, _get_proxy_token()):
         return {"downloads": get_recent_downloads(include_all=True)}
     viewer_key = request.query_params.get("s", "")
     if not viewer_key:
@@ -901,7 +1063,11 @@ def _handle_recent_downloads(request: Request) -> Dict[str, Any]:
     return {"downloads": get_recent_downloads(viewer_key=viewer_key)}
 
 
-def create_proxy_app(api_key: Optional[str] = None, port: Optional[int] = None) -> FastAPI:
+def create_proxy_app(
+    api_key: Optional[str] = None,
+    port: Optional[int] = None,
+    client: Optional["FPDClient"] = None,
+) -> FastAPI:
     """Create FastAPI application for petition document proxy
 
     Args:
@@ -909,20 +1075,41 @@ def create_proxy_app(api_key: Optional[str] = None, port: Optional[int] = None) 
                  If not provided, will attempt to load from USPTO_API_KEY environment variable.
         port: Optional port number for health check response.
               If not provided, reads from FPD_PROXY_PORT or PROXY_PORT environment variables.
+        client: Optional existing FPDClient to share (F-D1). Only valid when
+                the proxy runs in the SAME event loop as its owner — the
+                semaphore and breaker locks are asyncio primitives.
     """
     app = FastAPI(
         title="USPTO Petition Document Proxy",
         description="Secure proxy for USPTO petition document downloads",
         version="1.0.0",
-        lifespan=create_lifespan(api_key)
+        lifespan=create_lifespan(api_key, client=client)
     )
 
     # Store port in app state for health check
     # Check FPD_PROXY_PORT first (MCP-specific), then PROXY_PORT (generic)
     app.state.port = port if port is not None else _safe_parse_proxy_port()
 
-    # Add request size limit middleware (BEFORE other middleware)
+    # Add request size limit middleware (BEFORE other middleware).
+    # M-3: RequestSizeLimitMiddleware only reads Content-Length, so a chunked
+    # body (which carries none) passed the cap entirely. BodySizeLimitMiddleware
+    # counts the bytes as they are consumed and closes that bypass; the
+    # Content-Length middleware stays for its L15 400-on-malformed-header
+    # response, which is a different condition.
     app.add_middleware(RequestSizeLimitMiddleware, max_request_size=MAX_REQUEST_SIZE)
+    app.add_middleware(
+        BodySizeLimitMiddleware,
+        max_body_bytes=MAX_REQUEST_SIZE,
+        error_body={
+            "error": True,
+            "message": f"Request body too large. Maximum size: {MAX_REQUEST_SIZE} bytes",
+            "max_allowed": MAX_REQUEST_SIZE,
+        },
+        on_reject=lambda client_ip, size: logger.warning(
+            f"Request body over the {MAX_REQUEST_SIZE}-byte cap "
+            f"({size} bytes counted) from {client_ip or 'unknown'}"
+        ),
+    )
 
     # Add security headers middleware
     app.add_middleware(SecurityHeadersMiddleware)
@@ -942,19 +1129,17 @@ def create_proxy_app(api_key: Optional[str] = None, port: Optional[int] = None) 
     # IP allowlist: loopback always allowed; extend via PROXY_ALLOWED_IPS
     # (comma-separated IPs or CIDRs, e.g. Docker subnets - Lesson 32)
     #
-    # M5 (design note, not a bug): this is a loopback-only design by intent.
-    # `request.client.host` is the raw ASGI peer address; X-Forwarded-For is
-    # deliberately NOT trusted here because it is trivially spoofable by any
-    # direct caller (there is no trusted reverse proxy in front of this
-    # service in the default deployment). If this proxy is ever fronted by
-    # an actual reverse proxy, that proxy's own address must be added to
-    # PROXY_ALLOWED_IPS and its (trusted) XFF header parsed explicitly —
-    # do not simply start trusting the header from all callers.
+    # M-1: the address comes from shared/client_ip.py. X-Forwarded-For is
+    # still never trusted from an arbitrary caller — it is read only when the
+    # PEER is itself declared in FPD_TRUSTED_PROXY_IPS, and then the
+    # rightmost non-proxy entry is taken. With that unset (the default) this
+    # is byte-for-byte the previous peer-address behavior. Without it, behind
+    # a reverse proxy the allowlist saw one address for the whole internet.
     allowed_networks = _build_proxy_allowed_networks()
 
     @app.middleware("http")
     async def ip_allowlist(request: Request, call_next):
-        client_ip = request.client.host if request.client else ""
+        client_ip = client_ip_from_request(request)
         if not _is_ip_allowed(client_ip, allowed_networks):
             logger.warning(f"Rejected proxy request from non-allowlisted IP: {client_ip}")
             return JSONResponse(status_code=403, content={
@@ -1040,7 +1225,7 @@ def create_proxy_app(api_key: Optional[str] = None, port: Optional[int] = None) 
 
     @app.get("/downloads")
     async def downloads_page():
-        """Browser-facing downloads page — the URL-mode elicitation target.
+        """Browser-facing downloads page.
 
         No token (browser navigation can't send headers); protected by the
         same localhost bind + IP allowlist as everything else. ?highlight=
@@ -1049,16 +1234,10 @@ def create_proxy_app(api_key: Optional[str] = None, port: Optional[int] = None) 
         from fastapi.responses import HTMLResponse
         return HTMLResponse(_DOWNLOADS_PAGE_HTML)
 
-    @app.get("/rate-limit/{client_ip}")
-    async def check_rate_limit(client_ip: str):
-        """Check rate limit status for a client IP"""
-        return {
-            "client_ip": client_ip,
-            "remaining_requests": rate_limiter.get_remaining_requests(client_ip),
-            "max_requests": rate_limiter.max_requests,
-            "time_window": rate_limiter.time_window,
-            "reset_time": rate_limiter.get_reset_time(client_ip)
-        }
+    # M-4: GET /rate-limit/{client_ip} was removed. It had no caller in src/,
+    # it reported another address's request history to whoever asked, and
+    # every lookup inserted a permanent bucket keyed from a path parameter.
+    # The limiter's own counters are still reachable in-process.
 
     return app
 
@@ -1067,6 +1246,8 @@ def run_proxy_cli():
     """CLI entry point for proxy server"""
     import uvicorn
     import sys
+
+    load_env_file()
 
     # Check FPD_PROXY_PORT first (MCP-specific), then PROXY_PORT (generic), then default to 8081
     default_port = _safe_parse_proxy_port()

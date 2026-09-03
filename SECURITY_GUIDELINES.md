@@ -13,9 +13,9 @@ Operator-relevant summary of the July 2026 audit-remediation series. See `CLAUDE
 - **Security-log content minimization** — masked emails/IPs, no raw tokens or query text reach the security log (flow metadata only).
 - **Refresh-token family revocation** — replay of a spent/rotated OAuth refresh token revokes every live token for that identity and logs a suspicious_activity event.
 - **Internal-token privilege split** — the plain `FPD_AUTH_INTERNAL_TOKEN` grants `fpd:user` scope only; admin scope for headless/machine clients requires the separate `FPD_AUTH_INTERNAL_ADMIN_TOKEN`.
-- **OCR spend ceiling** — `MISTRAL_OCR_DAILY_BUDGET_USD` caps daily Mistral OCR spend (default unset = unlimited); when the budget would be exceeded, the call is rejected with a detailed error message (current spend, estimated cost, budget, and next reset time).
+- **OCR daily ceiling** — `MISTRAL_OCR_DAILY_BUDGET_USD` bounds how much metered Mistral OCR the server will run in one UTC day (built-in default `5.00`; an explicit `0` opts out). When the ceiling would be exceeded the call is rejected with a neutral message ("OCR capacity limit reached; try again later."); the accounting detail stays in the server-side log.
 - **Viewer-key downloads registry** — per-registrant SHA-256 keyed scope for the downloads panel's `/api/recent-downloads` endpoint; the plain viewer key travels in the URL (`?s=...`), the proxy stores only its hash, and entries are scoped so users see only their own registered downloads.
-- **pypdf + streaming caps** — pypdf extraction capped at 200 pages; Mistral OCR limited to first 50 pages; Docling capped at `DOCLING_MAX_PAGES` (default 25); PDF downloads hard-capped at 100MB to prevent unbounded buffering.
+- **pypdf + streaming caps** — pypdf extraction capped at 200 pages; Mistral OCR capped at `MISTRAL_OCR_MAX_PAGES` (default 50); Docling capped at `DOCLING_MAX_PAGES` (default 25); buffered PDF extraction capped at `FPD_MAX_PDF_BYTES` (default 25MB) and proxied downloads at `FPD_MAX_EGRESS_PDF_BYTES` (default 100MB) to prevent unbounded buffering.
 - **Shared cross-process USPTO rate limiter** — see the README section "Shared USPTO rate limiting" (this repo is the origin; the other 3 MCPs vendored from it).
 
 ## API Key Management

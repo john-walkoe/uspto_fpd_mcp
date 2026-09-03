@@ -37,42 +37,35 @@ class FPDService:
         self.field_manager = field_manager
         logger.info("FPDService initialized with injected dependencies")
 
+    async def _search(
+        self, query: str, *, field_set: str, limit: int, offset: int
+    ) -> Dict[str, Any]:
+        """One search implementation; the tier is a parameter.
+
+        F-D3 (design-pattern-implmentation): search_petitions_minimal and
+        search_petitions_balanced were 35 duplicated lines differing only by
+        the literal "petitions_minimal" / "petitions_balanced".
+        """
+        result = await self.api_client.search_petitions(
+            query=query,
+            fields=self.field_manager.get_fields(field_set),
+            limit=limit,
+            offset=offset,
+        )
+        if "error" in result:
+            return result
+        return self.field_manager.filter_response(result, field_set)
+
     async def search_petitions_minimal(
         self,
         query: str,
         limit: int = 50,
         offset: int = 0
     ) -> Dict[str, Any]:
-        """
-        Perform minimal petition search with context reduction
-
-        Args:
-            query: Search query
-            limit: Number of results to return
-            offset: Offset for pagination
-
-        Returns:
-            Filtered search results
-        """
-        # Get minimal field set
-        fields = self.field_manager.get_fields("petitions_minimal")
-
-        # Perform search
-        result = await self.api_client.search_petitions(
-            query=query,
-            fields=fields,
-            limit=limit,
-            offset=offset
+        """Minimal-tier petition search (8 fields, maximum context reduction)."""
+        return await self._search(
+            query, field_set="petitions_minimal", limit=limit, offset=offset
         )
-
-        # Check for errors
-        if "error" in result:
-            return result
-
-        # Filter response using field manager
-        filtered_result = self.field_manager.filter_response(result, "petitions_minimal")
-
-        return filtered_result
 
     async def search_petitions_balanced(
         self,
@@ -80,42 +73,17 @@ class FPDService:
         limit: int = 10,
         offset: int = 0
     ) -> Dict[str, Any]:
-        """
-        Perform balanced petition search with more fields
-
-        Args:
-            query: Search query
-            limit: Number of results to return
-            offset: Offset for pagination
-
-        Returns:
-            Filtered search results
-        """
-        # Get balanced field set
-        fields = self.field_manager.get_fields("petitions_balanced")
-
-        # Perform search
-        result = await self.api_client.search_petitions(
-            query=query,
-            fields=fields,
-            limit=limit,
-            offset=offset
+        """Balanced-tier petition search (18 fields)."""
+        return await self._search(
+            query, field_set="petitions_balanced", limit=limit, offset=offset
         )
-
-        # Check for errors
-        if "error" in result:
-            return result
-
-        # Filter response using field manager
-        filtered_result = self.field_manager.filter_response(result, "petitions_balanced")
-
-        return filtered_result
 
     async def search_by_art_unit(
         self,
         art_unit: str,
         date_range: Optional[str] = None,
-        limit: int = 50
+        limit: int = 50,
+        offset: int = 0,
     ) -> Dict[str, Any]:
         """
         Search petitions by art unit
@@ -124,6 +92,7 @@ class FPDService:
             art_unit: Art unit number
             date_range: Optional date range filter
             limit: Number of results to return
+            offset: Starting position, for paging past `limit`
 
         Returns:
             Search results for the art unit
@@ -131,7 +100,8 @@ class FPDService:
         result = await self.api_client.search_by_art_unit(
             art_unit=art_unit,
             date_range=date_range,
-            limit=limit
+            limit=limit,
+            offset=offset,
         )
 
         # Filter response using balanced field set
@@ -143,7 +113,9 @@ class FPDService:
     async def search_by_application(
         self,
         application_number: str,
-        include_documents: bool = False
+        include_documents: bool = False,
+        limit: int = 100,
+        offset: int = 0,
     ) -> Dict[str, Any]:
         """
         Search petitions by application number
@@ -154,18 +126,53 @@ class FPDService:
                 True the response is returned unfiltered (full data), matching
                 the tool-level semantics (a caller who explicitly asked for
                 documents gets the complete record, not the balanced subset).
+            limit: Maximum number of petition records to return
+            offset: Starting position, for paging past `limit`
 
         Returns:
             All petitions for the application
+
+        D-3: the requested projection is resolved HERE, from the same
+        `petitions_balanced` set in `field_configs.yaml` that this method
+        already filters the response against. The client used to carry its own
+        divergent 16-field literal, so this tool ignored the documented
+        customization surface and asked USPTO for two fewer fields than the
+        balanced set defines.
         """
         result = await self.api_client.search_by_application(
             application_number=application_number,
             include_documents=include_documents,
+            limit=limit,
+            offset=offset,
+            fields=(
+                None if include_documents
+                else self.field_manager.get_fields("petitions_balanced")
+            ),
         )
 
         # Filter response using balanced field set (unless documents requested)
-        if "error" not in result and not include_documents:
-            result = self.field_manager.filter_response(result, "petitions_balanced")
+        if "error" not in result:
+            if include_documents:
+                # No field projection here: filtering to the balanced set would
+                # strip the documentBag the caller explicitly asked for. Say so
+                # rather than letting context_info silently disappear on this
+                # one path — its absence otherwise reads as "no filtering
+                # information available".
+                result["context_info"] = {
+                    "fields_used": [],
+                    "field_set": "unfiltered",
+                    "original_field_count": None,
+                    "filtered_field_count": None,
+                    "context_reduction": "0%",
+                    "note": (
+                        "include_documents=True returns the full petition "
+                        "record with its documentBag; no field set was "
+                        "applied. Call without include_documents for the "
+                        "petitions_balanced projection."
+                    ),
+                }
+            else:
+                result = self.field_manager.filter_response(result, "petitions_balanced")
 
         return result
 
@@ -201,7 +208,7 @@ class FPDService:
         Args:
             petition_id: Petition UUID
             document_identifier: Document identifier
-            auto_optimize: Use hybrid extraction (PyPDF2 + OCR fallback)
+            auto_optimize: Use hybrid extraction (pypdf + OCR fallback)
 
         Returns:
             Extracted document content
@@ -211,15 +218,6 @@ class FPDService:
             document_identifier=document_identifier,
             auto_optimize=auto_optimize
         )
-
-    def get_available_field_sets(self) -> Dict[str, Dict]:
-        """
-        Get all available field sets from field manager
-
-        Returns:
-            Dictionary of field sets and their configurations
-        """
-        return self.field_manager.get_predefined_sets()
 
     def get_context_settings(self) -> Dict[str, int]:
         """

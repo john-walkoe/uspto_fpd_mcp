@@ -7,12 +7,21 @@ are used by both tools/petitions.py and tools/documents.py.
 
 import re
 from datetime import datetime
+from typing import Optional
 
 from .shared.error_utils import ValidationError, generate_request_id
 
+# R-3 (readability-and-naming): three of these functions return None for an
+# empty input and were annotated `-> str`, which mypy reported six times and
+# which actively misleads a reader of the module whose whole job is to be the
+# trusted boundary for values interpolated into Lucene queries. A caller
+# trusting the annotation and writing `validate_string_param(...).lower()`
+# gets an AttributeError on empty input. The parameters are Optional for the
+# same reason: each function's first act is to test for a falsy value.
 
-def validate_date_range(date_str: str) -> str:
-    """Validate date string in YYYY-MM-DD format"""
+
+def validate_date_range(date_str: Optional[str]) -> Optional[str]:
+    """Validate date string in YYYY-MM-DD format. None/empty returns None."""
     if not date_str:
         return None
 
@@ -52,8 +61,10 @@ def validate_date_range(date_str: str) -> str:
 _ALLOWED_STRING_PARAM_RE = re.compile(r"^[\w\s.,&'-]+$")
 
 
-def validate_string_param(param_name: str, param_value: str, max_length: int = 200) -> str:
-    """Validate string parameter input"""
+def validate_string_param(
+    param_name: str, param_value: Optional[str], max_length: int = 200
+) -> Optional[str]:
+    """Validate string parameter input. None/empty returns None."""
     if not param_value:
         return None
 
@@ -77,8 +88,8 @@ def validate_string_param(param_name: str, param_value: str, max_length: int = 2
     return clean_value
 
 
-def validate_application_number(app_number: str) -> str:
-    """Validate and clean USPTO application number format"""
+def validate_application_number(app_number: Optional[str]) -> Optional[str]:
+    """Validate and clean a USPTO application number. None/empty returns None."""
     if not app_number:
         return None
 
@@ -111,7 +122,7 @@ _PETITION_ID_RE = re.compile(
 _DOCUMENT_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9]{8,32}$")
 
 
-def validate_petition_id(petition_id: str) -> str:
+def validate_petition_id(petition_id: Optional[str]) -> str:
     """Validate petition_id is UUID-shaped before it reaches URL construction."""
     petition_id = (petition_id or "").strip()
     if not petition_id:
@@ -121,7 +132,7 @@ def validate_petition_id(petition_id: str) -> str:
     return petition_id
 
 
-def validate_document_identifier(document_identifier: str) -> str:
+def validate_document_identifier(document_identifier: Optional[str]) -> str:
     """Validate document_identifier is an alnum code of the expected shape."""
     document_identifier = (document_identifier or "").strip()
     if not document_identifier:

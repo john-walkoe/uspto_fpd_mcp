@@ -125,7 +125,7 @@ Enter your USPTO API key: ****************************** [your_uspto_key_here]
 [OK] USPTO API key format validated (30 chars, lowercase)
 
 [INFO] Mistral API key is OPTIONAL (for OCR on scanned petition documents)
-       Without it, you can still use free PyPDF2 extraction for text-based PDFs
+       Without it, text-layer PDFs are still extracted directly with pypdf
 
 [INFO] Mistral API key is OPTIONAL (for OCR on scanned documents)
 [INFO] Press Enter to skip, or enter your 32-character Mistral API key
@@ -162,7 +162,7 @@ that offers enhanced features when used with FPD MCP:
 Do you have the USPTO PFW MCP already installed? (y/N): n
 [INFO] FPD will run in standalone mode with local proxy (always-on)
        Install USPTO PFW MCP later for enhanced features:
-       https://github.com/johnwalkoe/patent_filewrapper_mcp
+       https://github.com/john-walkoe/uspto_pfw_mcp
 
 [INFO] Configuring shared INTERNAL_AUTH_SECRET...
 [OK] Using existing INTERNAL_AUTH_SECRET from unified storage
@@ -219,14 +219,15 @@ Security Features:
   [*] Hidden file attributes applied to key files
   [*] Audit logging enabled (~/.uspto_mcp_audit.log)
 
-Available Tools (7):
-  - fpd_search_petitions_minimal (ultra-fast discovery)
-  - fpd_search_petitions_balanced (detailed analysis)
-  - fpd_search_by_art_unit (art unit quality)
-  - fpd_search_by_application (petition history)
-  - fpd_get_petition_details (full details)
-  - fpd_get_document_download (PDF downloads)
-  - fpd_get_tool_reflections (workflow guidance)
+Available Tools (8):
+  - FPD_Search_petitions_minimal (ultra-fast discovery)
+  - FPD_Search_petitions_balanced (detailed analysis)
+  - FPD_Search_petitions_by_art_unit (art unit quality)
+  - FPD_Search_petitions_by_application (petition history)
+  - FPD_Get_petition_details (full details)
+  - FPD_get_document_download (PDF downloads)
+  - FPD_get_document_content_with_ocr (document text extraction)
+  - FPD_get_guidance (workflow guidance)
 
 Proxy Server:
   Start with: uv run fpd-proxy
@@ -236,8 +237,8 @@ Key Management:
   Manage keys: ./deploy/manage_api_keys.ps1
   Cross-MCP:   Keys shared with PFW, PTAB, and Citations MCPs
 
-Test with: fpd_search_petitions_minimal
-Learn workflows: fpd_get_tool_reflections
+Test with: FPD_Search_petitions_minimal
+Learn workflows: FPD_get_guidance
 
 ```
 
@@ -507,7 +508,7 @@ SUCCESS
   uv run fpd-mcp --help
 
 [INFO] Test with Claude Code:
-  Ask Claude: 'Use fpd_search_petitions_minimal to search for patents'
+  Ask Claude: 'Use FPD_Search_petitions_minimal to search for patents'
 
 [INFO] Manage API keys:
   Run: ./deploy/manage_api_keys.ps1 (Windows) or edit secure storage files
@@ -734,7 +735,7 @@ For workflow automation with **locally hosted n8n instances**, you can integrate
 6. **Test Connection:**
 
    - Use "List Tools" operation to see available USPTO Final Petition Decisions functions
-   - Use "Execute Tool" operation with `Search_petitions_by_application`
+   - Use "Execute Tool" operation with `FPD_Search_petitions_by_application`
    - Parameters example: `{"application_number":"13408005"}`
    - Results of the Execute Tool should look like this if everything is working correctly
 
@@ -760,7 +761,7 @@ The n8n integration enables powerful automation workflows combining USPTO petiti
 
 **Optional with defaults:**
 
-- `MISTRAL_API_KEY`: Mistral API key for OCR on scanned petition documents (Default: None - uses free PyPDF2 extraction)
+- `MISTRAL_API_KEY`: Mistral API key for OCR on scanned petition documents (Default: None - text-layer PDFs are extracted with pypdf; a self-hosted Docling backend via `DOCLING_SERVE_URL` is an alternative OCR tier)
 - `MISTRAL_OCR_MODEL`: Mistral OCR model slug (Default: `mistral-ocr-latest`, which tracks Mistral's current GA model = OCR 4; pin a dated slug e.g. `mistral-ocr-2503` / `mistral-ocr-4-0` for deterministic OCR)
 - `FPD_PROXY_PORT`: Local proxy server port (Default: `8081` - avoids conflict with PFW on 8080)
 - `ENABLE_PROXY_SERVER`: Enable/disable proxy functionality (Default: `true`)
@@ -769,6 +770,7 @@ The n8n integration enables powerful automation workflows combining USPTO petiti
   - `false`: Legacy on-demand mode - proxy starts on first download (not recommended)
 - `USPTO_TIMEOUT`: API request timeout in seconds (Default: `30.0`)
 - `USPTO_DOWNLOAD_TIMEOUT`: Document download/OCR timeout in seconds (Default: `60.0`)
+- `INTERNAL_AUTH_SECRET`: Shared HMAC secret across the USPTO MCP suite (x-api-key transport gate in HTTP mode, and the inter-MCP service-token root FPD uses to register documents with PFW's centralized proxy). Auto-generated and shared across MCPs via secure storage on first install ("first MCP wins"). **Rotating it (S-06, PT-14):** may be a comma-separated list, current value first (`new,old`) — every check against it accepts every listed value, so rotation no longer needs all four MCPs to restart in the same instant. `uv run python scripts/rotate_internal_auth_secret.py` generates a new value and prints the two-step env line: deploy the combined value to all four MCPs and roll them one at a time, then drop the old value and roll again to close the overlap window.
 
 **PFW Integration (Instant Detection):**
 
@@ -905,7 +907,7 @@ claude mcp add uspto_fpd -s user \
 - **Mistral API Key** (optional) - For OCR functionality from [Mistral AI](https://mistral.ai/solutions/document-ai) - See **[API_KEY_GUIDE.md](API_KEY_GUIDE.md)** for setup instructions
 - **Claude Desktop or Claude Code** - For MCP integration
 
-**Note:** The Mistral API key is optional. Without it, document extraction uses free PyPDF2 (works for text-based PDFs). With it, OCR is available for scanned documents (~$0.001/page).
+**Note:** The Mistral API key is optional. Without it, document extraction reads the PDF's native text layer with pypdf, which covers text-based PDFs. Add it to OCR scanned documents, or point `DOCLING_SERVE_URL` at a self-hosted Docling backend (for example `docling-serve`) to use that tier instead.
 
 ### Step 1: Install uv (if not already installed)
 
@@ -1277,10 +1279,10 @@ uv run fpd-mcp --help
 In Claude Code, try these commands:
 ```
 # Test minimal petition search
-fpd_search_petitions_minimal {"query": "artificial intelligence", "limit": 2}
+FPD_Search_petitions_minimal {"query": "artificial intelligence", "limit": 2}
 
 # Test application-specific search
-fpd_search_by_application {"application_number": "13408005"}
+FPD_Search_petitions_by_application {"application_number": "13408005"}
 ```
 
 **3. Verify MCP Connection:**
@@ -1327,8 +1329,8 @@ Expected response format:
 **Solution:** The USPTO API has rate limits. Wait a few minutes before retrying.
 
 **Best practices:**
-- Use `fpd_search_petitions_minimal` for discovery (faster, less data)
-- Use `fpd_search_petitions_balanced` for detailed analysis (fewer results)
+- Use `FPD_Search_petitions_minimal` for discovery (faster, less data)
+- Use `FPD_Search_petitions_balanced` for detailed analysis (fewer results)
 - Progressive disclosure: Minimal → User selection → Balanced analysis
 
 **"Failed to connect to MCP server"**
@@ -1343,6 +1345,31 @@ Expected response format:
 **View logs:**
 - **Windows:** `%APPDATA%\Claude\logs\`
 - **Linux:** `~/.config/claude/logs/` or `~/.claude/logs/`
+
+---
+
+## Running more than one USPTO MCP on the same host
+
+The four USPTO servers (Citations, PFW, PTAB, FPD) share ONE USPTO API key,
+and USPTO's documented limits are per-KEY, not per-process. A limiter inside
+one server cannot see what the other three are doing, so out of the box each
+of them independently allows up to 10 concurrent requests against a quota
+that is shared.
+
+Point all of them at one bind-mounted directory and they coordinate through
+a cross-process token bucket and a bounded pool of concurrency slots,
+arbitrated with POSIX file locks (released by the kernel on process death,
+so it is crash-safe):
+
+```bash
+USPTO_SHARED_RATE_LIMIT_DIR=/var/run/uspto-shared-rate-limit
+USPTO_SHARED_RATE_LIMIT_RPS=4.0     # total tokens/sec across ALL FOUR
+USPTO_SHARED_MAX_CONCURRENT=2       # shared in-flight request slots
+```
+
+This is configuration only, no code change, and it is off by default so a
+standalone install is unaffected. It is the actual fix for the shared-quota
+429s that `RETRY_429_DELAY` only cushions.
 
 ---
 

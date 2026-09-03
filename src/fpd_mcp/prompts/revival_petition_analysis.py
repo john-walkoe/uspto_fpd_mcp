@@ -1,5 +1,7 @@
 """Revival Petition Analysis - Find abandonment patterns and revival success rates"""
 
+from ._flags import flag
+
 
 async def revival_petition_analysis_prompt(
     company_name: str = "",
@@ -23,6 +25,10 @@ async def revival_petition_analysis_prompt(
 
     Returns comprehensive revival petition analysis with abandonment risk indicators and procedural insights.
     """
+    # R-2: accept any encoding a caller sends (True, 'True', 'yes',
+    # '1'); the emitted template compares the normalized literal.
+    include_reasoning = flag(include_reasoning)
+
     return f"""Revival Petition Analysis - Abandonment Risk Assessment
 
 Inputs Provided:
@@ -57,7 +63,7 @@ if "{art_unit}":
     search_filters['art_unit'] = "{art_unit}"
 
 # Search for revival petitions (37 CFR 1.137)
-revival_petitions = fpd_search_petitions_minimal(
+revival_petitions = FPD_Search_petitions_minimal(
     petition_date_start=date_start,
     petition_date_end=date_end,
     **search_filters,
@@ -83,7 +89,7 @@ for petition in revival_petitions.get('results', []):
 
     # Get detailed petition info to verify it's a revival petition
     try:
-        details = fpd_get_petition_details(petition_id=petition_id, include_documents=False)
+        details = FPD_Get_petition_details(petition_id=petition_id, include_documents=False)
         rules = details.get('ruleBag', [])
 
         # Check if it's actually a 37 CFR 1.137 revival petition
@@ -131,7 +137,7 @@ total_applications = 0
 if "{company_name}":
     try:
         # Get company's total application count from PFW
-        pfw_apps = pfw_search_applications_minimal(
+        pfw_apps = PFW_search_applications_minimal(
             applicant_name="{company_name}",
             filing_date_start=date_start,
             fields=['applicationNumberText'],
@@ -211,7 +217,7 @@ if "{include_reasoning}" == "true" and revival_results['granted'] > 0:
 
     for granted_petition in granted_petitions:
         try:
-            details = fpd_get_petition_details(
+            details = FPD_Get_petition_details(
                 petition_id=granted_petition['petition_id'],
                 include_documents=True  # Get decision documents
             )
@@ -259,7 +265,7 @@ Search refinement based on inputs:
 - Date filtering: Add `AND decisionDate:[{date_range_start or "2019-01-01"} TO 2024-12-31]`
 
 ### Step 2: Execute Revival Petition Search
-Use `fpd_search_petitions_balanced` with the refined query for detailed analysis (limit: 50)
+Use `FPD_Search_petitions_balanced` with the refined query for detailed analysis (limit: 50)
 
 ## ABANDONMENT RISK ANALYSIS
 
@@ -285,7 +291,7 @@ Use `fpd_search_petitions_balanced` with the refined query for detailed analysis
 
 ## SUCCESS FACTOR ANALYSIS (if include_reasoning=true)
 
-For granted revival petitions, use `fpd_get_petition_details` to analyze:
+For granted revival petitions, use `FPD_Get_petition_details` to analyze:
 - Director's reasoning patterns
 - Successful argument types
 - Common justifications
@@ -321,7 +327,7 @@ Typical Success Factors:
 ** With Patent File Wrapper MCP:**
 For complete abandonment analysis, cross-reference prosecution history:
 ```
-pfw_search_applications_balanced(
+PFW_search_applications_balanced(
     query="firstApplicantName:{company_name or '*'}",
     limit=100
 )

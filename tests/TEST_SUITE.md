@@ -1,4 +1,13 @@
-# FPD MCP — Manual End-to-End Test Suite (FastMCP 3.0)
+# FPD MCP — Manual End-to-End Test Suite (FastMCP 4.0.1)
+
+> **Tool visibility caveat (2026-09-02):** `defer_loading: false` is advisory
+> metadata that each client applies by its own policy, so an expected tool
+> being invisible in a given client is not, by itself, a server defect. If a
+> tool this suite calls does not appear, verify the server contract first
+> (direct stdio or in-container probe of `tools/list`) and record
+> "not surfaced in this client (server contract verified)" rather than
+> "tool missing". Load-bearing workflow content deliberately also rides in
+> per-tool docstrings and return-path notes for exactly this reason.
 
 Run these via Claude Desktop (STDIO) against the migrated server. Tests
 marked ⭐ produce identifiers used by later tests. Anchor data was validated
@@ -14,14 +23,26 @@ treat them as "approximately").
 > configure `MISTRAL_API_KEY` or `DOCLING_SERVE_URL` for the OCR
 > fallback), T16-T17 pass.
 
+> **⚠ Identifier formats (suite audited 2026-09-02):** `application_number` is
+> the APPLICATION serial and is a different namespace from a granted patent
+> number. Since patent numbers passed 10,000,000 in mid-2018 the two collide at
+> 8 digits, and **this server does not lane-resolve between them:** an 8-digit
+> patent number passed as `application_number` returns a clean empty result that
+> reads as "no petitions", which is wrong rather than empty. The PFW MCP is the
+> crosswalk (`PFW_search_applications_minimal` with `query='patentNumber:<n>'`
+> or `query='applicationNumberText:<n>'`). **Audit result:** the only numeric
+> identifier in this suite is T4's `13408005`, which is an APPLICATION serial;
+> no granted patent number is passed anywhere. Keep it that way, or say which
+> namespace a new fixture means.
+
 ## Reference anchors
 
 | Anchor | Value | Used by |
 |---|---|---|
-| Applicant | `Apple` (~31 petitions) | T1 |
-| Decision type | `DENIED` (~7,473) | T2, T8, T9 |
+| Applicant | `Apple` (31 petitions) | T1 |
+| Decision type | `DENIED` (7,481) | T2, T8, T9 |
 | Balanced combo | art_unit `2128` + type `551` + `DENIED` (=2) | T3 |
-| Application | `13408005` (=1 petition) | T4 |
+| Application | `13408005` (=1 petition); application SERIAL, not a patent number | T4 |
 | Petition (download) | `e55bd36d-961f-511e-b72c-b4b1529d67ef`, doc `HY1J6ICXPXXIFW4` | T5, T6 |
 | Petition (OCR) | `9b44e6aa-b9fa-59f8-8d73-6c682b5f4426`, doc `MA15BPLNWFYBX96` | T11 |
 | Art unit | `2128` (=3 petitions) | T7 |
@@ -36,39 +57,39 @@ FPD_get_guidance
 ```
 **Expect:** sectioned guidance text; no error.
 
-### T1 Search_petitions_minimal — applicant search ⭐
+### T1 FPD_Search_petitions_minimal — applicant search ⭐
 ```
-Search_petitions_minimal
+FPD_Search_petitions_minimal
 {"applicant_name": "Apple", "limit": 2}
 ```
-**Expect:** `count` ≈ 31, 2 records with the 8 minimal fields. **MCP App
+**Expect:** `count` = 31, 2 records with the 8 minimal fields. **MCP App
 view renders**: petition cards with decision badges; tier badge MINIMAL.
 
-### T2 Search_petitions_minimal — broader search
+### T2 FPD_Search_petitions_minimal — broader search
 ```
-Search_petitions_minimal
+FPD_Search_petitions_minimal
 {"decision_type": "DENIED", "limit": 2}
 ```
-**Expect:** `count` ≈ 7,473. View shows Found ~7,473 / Showing 2.
+**Expect:** `count` = 7,481. View shows Found 7,481 / Showing 2.
 
-### T3 Search_petitions_balanced — advanced filters
+### T3 FPD_Search_petitions_balanced — advanced filters
 ```
-Search_petitions_balanced
+FPD_Search_petitions_balanced
 {"art_unit": "2128", "petition_type_code": "551", "decision_type": "DENIED", "limit": 2}
 ```
 **Expect:** `count` = 2; balanced-tier fields (ruleBag, inventionTitle,
 groupArtUnitNumber…). View filter pills for Decision/Type when values vary.
 
-### T4 Search_petitions_by_application
+### T4 FPD_Search_petitions_by_application
 ```
-Search_petitions_by_application
+FPD_Search_petitions_by_application
 {"application_number": "13408005"}
 ```
 **Expect:** `count` = 1.
 
-### T5 Get_petition_details — with documents ⭐
+### T5 FPD_Get_petition_details — with documents ⭐
 ```
-Get_petition_details
+FPD_Get_petition_details
 {"petition_id": "e55bd36d-961f-511e-b72c-b4b1529d67ef", "include_documents": true}
 ```
 **Expect:** petition record with `documentBag` containing doc
@@ -90,44 +111,55 @@ ERR_ABORTED + the PDF lands in Downloads (no 401 — the hash is the
 credential). ⚠️ Blocked by the same upstream outage until USPTO fixes
 `includeDocuments`.
 
-### T7 Search_petitions_by_art_unit
+### T7 FPD_Search_petitions_by_art_unit
 ```
-Search_petitions_by_art_unit
+FPD_Search_petitions_by_art_unit
 {"art_unit": "2128", "limit": 5}
 ```
 **Expect:** `count` = 3.
 
 ### T8 Temporal analysis — date range
 ```
-Search_petitions_minimal
+FPD_Search_petitions_minimal
 {"decision_type": "DENIED", "petition_date_start": "2024-01-01", "petition_date_end": "2024-12-31", "limit": 5}
 ```
 **Expect:** `count` = 239.
 
 ### T9 Parameter validation — balanced-only param on minimal tier
 ```
-Search_petitions_minimal
+FPD_Search_petitions_minimal
 {"decision_type": "DENIED", "petition_type_code": "551", "limit": 5}
 ```
-**Expect (changed under FastMCP 3):** a structured validation error naming
+**Expect (changed at the FastMCP 3 migration, unchanged on 4.0.1):** a structured validation error naming
 `petition_type_code` as an unexpected argument (pre-migration behavior was
 silent degradation). The model should retry without the param or switch to
-`Search_petitions_balanced`. No hang, no generic 500.
+`FPD_Search_petitions_balanced`. No hang, no generic 500.
+
+> DIRECT CALL ONLY (verified 2026-09-02 on FastMCP 4.0.1): this test cannot
+> be run through claude.ai, whose client enforces the published
+> `additionalProperties: false` schema and refuses to send the unexpected
+> argument at all, so the call never reaches the server. That is a PASS at
+> an even earlier layer, not a failure. To exercise the server-side error,
+> call over stdio or raw HTTP: the server answers `is_error: true` with a
+> structured "1 validation error for call[fpd_search_petitions_minimal]"
+> body naming the parameter. A tester who cannot make direct calls should
+> record T9 as "blocked client-side by schema (expected)".
 
 ### T10 Parameter validation — balanced tier accepts the params
 ```
-Search_petitions_balanced
+FPD_Search_petitions_balanced
 {"decision_type": "DENIED", "petition_type_code": "551", "limit": 5}
 ```
 **Expect:** normal results (petition_type_code is a balanced-tier param).
 
-### T11 FPD_get_document_content_with_mistral_ocr ⭐
+### T11 FPD_get_document_content_with_ocr ⭐
 ```
-FPD_get_document_content_with_mistral_ocr
+FPD_get_document_content_with_ocr
 {"petition_id": "9b44e6aa-b9fa-59f8-8d73-6c682b5f4426", "document_identifier": "MA15BPLNWFYBX96", "auto_optimize": true}
 ```
-**Expect:** `extracted_content` text; `extraction_method` PyPDF2 (free) or
-Mistral OCR; **progress notifications** appear during download/OCR.
+**Expect:** `extracted_content` text; `extraction_method` `pypdf` (native
+text layer) or `Mistral OCR (...)`; **progress notifications** appear
+during download/OCR.
 Docling is the third tier for scanned docs ≤ 25 pages when
 `DOCLING_SERVE_URL` is set. ⚠️ Blocked by the upstream outage.
 Also expect a `provenance_note` field (retrieved-text-is-data labeling,
@@ -145,13 +177,6 @@ system browser.
 Open `http://localhost:8081/downloads?highlight={download_id from T6}` in
 a browser. **Expect:** FPD-branded page, the highlighted row scrolls into
 view, Download PDF works, list refreshes every 5s.
-
-### T14 URL elicitation (Claude Desktop only)
-After T6 in Claude Desktop: an elicitation prompt offers to open the FPD
-downloads page. **Accept** → browser opens `/downloads?highlight=…`;
-**Decline** → normal JSON result regardless. On clients without URL
-elicitation (claude.ai) the prompt must NOT appear and the tool must not
-hang (capability gate).
 
 ### T15 Centralized proxy mode
 With `CENTRALIZED_PROXY_URL=http://localhost:8080` (local PFW proxy

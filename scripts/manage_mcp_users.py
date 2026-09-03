@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import getpass
 import os
 import sys
 from pathlib import Path
@@ -30,8 +31,49 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 
+def _cli_actor() -> str:
+    """Identify the operator running this script for the audit record."""
+    try:
+        who = getpass.getuser()
+    except Exception:
+        who = os.getenv("USER") or os.getenv("USERNAME") or "unknown"
+    return f"cli:{who}"
+
+
+def _audit(action: str, target: str, success: bool, role: str = None,
+           detail: str = None) -> None:
+    """Mirror tools/admin.py::_audit_user_management for the CLI (M-11).
+
+    The mcp_users table is shared with PFW and PTAB, so a grant made here is
+    a grant on three servers and needs the same record as one made through
+    FPD_manage_users. Never raises: a failed audit write must not turn a
+    successful grant into a CLI failure.
+    """
+    try:
+        from fpd_mcp.shared.security_logger import security_logger
+
+        security_logger.log_admin_action(
+            actor=_cli_actor(),
+            action=action,
+            target=target,
+            role=role,
+            success=success,
+            detail=detail,
+        )
+    except Exception as audit_error:  # pragma: no cover - defensive
+        print(
+            f"warning: admin audit write failed: {type(audit_error).__name__}",
+            file=sys.stderr,
+        )
+
+
 async def run(args: argparse.Namespace) -> int:
     from fpd_mcp.auth.store import McpUserStore
+    from fpd_mcp.config.log_config import setup_logging
+
+    # Attach the security handler so CLI mutations land in security.log
+    # next to the ones made through FPD_manage_users.
+    setup_logging(os.getenv("LOG_LEVEL", "WARNING"))
 
     db_path = os.getenv("FPD_AUTH_DB_PATH", "data/mcp_auth.db")
     store = McpUserStore(db_path)
@@ -60,19 +102,24 @@ async def run(args: argparse.Namespace) -> int:
         await store.upsert_user(
             email, role=args.role, display_name=args.name, notes=args.notes
         )
+        _audit("add", email, True, role=args.role)
         print(f"added/updated {email} role={args.role}")
     elif args.command == "set-role":
         user = await store.get_user(email)
         if user is None:
+            _audit("set_role", email, False, role=args.role, detail="no such user")
             print(f"no such user: {email}", file=sys.stderr)
             return 1
         await store.upsert_user(email, role=args.role, active=user["active"])
+        _audit("set_role", email, True, role=args.role)
         print(f"{email} role -> {args.role}")
     elif args.command in ("activate", "deactivate"):
         active = args.command == "activate"
         if not await store.set_active(email, active):
+            _audit(args.command, email, False, detail="no such user")
             print(f"no such user: {email}", file=sys.stderr)
             return 1
+        _audit(args.command, email, True)
         print(f"{email} active -> {active}")
     return 0
 

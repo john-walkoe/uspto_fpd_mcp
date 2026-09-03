@@ -20,7 +20,9 @@ async def fpd_get_guidance(section: str = "overview") -> str:
 🏢 "Complete portfolio due diligence" → workflows_complete
 📚 "Research CFR rules with Assistant" → workflows_assistant
 🎯 "Ultra-minimal PFW + FPD workflows" → ultra_context
-💰 "Reduce extraction costs" → cost
+"Choose an extraction approach" → extraction
+📏 "Why was my response truncated / how do I page it?" → limits
+"Why did an old petition return zero results?" → coverage
 
 Available sections:
 - overview: Available sections and MCP overview (default)
@@ -33,7 +35,9 @@ Available sections:
 - red_flags: Petition red flag indicators and CFR rules
 - documents: Document extraction, downloads, proxy configuration
 - ultra_context: PFW fields parameter + ultra-minimal workflows
-- cost: Cost optimization for document extraction
+- extraction: Extraction-tier selection for speed and quality
+- limits: Active response-size budgets, the _bounds/_window markers, paging
+- coverage: Dataset coverage bounds (2001+ filings; decisions data from 2022, backfilled monthly)
 
 Context Efficiency Benefits:
 - 80-95% token reduction (2-8KB per section vs 62KB total)
@@ -43,8 +47,20 @@ Context Efficiency Benefits:
     try:
         return get_guidance_section(section)
     except Exception as e:
-        logger.error(f"Unexpected error in get guidance: {str(e)}")
-        return f"Error: Internal error - {str(e)}"
+        # F-E2: this returned `f"Error: Internal error - {str(e)}"`, a plain
+        # string that bypassed LogSanitizer AND the production genericization
+        # entirely, so str(e) reached the model verbatim in every
+        # environment. The tool's return type is `str`, so the envelope is
+        # not available here; the message is a constant instead, and the
+        # detail stays in the log with a traceback (F-X5).
+        logger.error(
+            "Unexpected error in get guidance: %s", type(e).__name__,
+            exc_info=True,
+        )
+        return (
+            "Error: that guidance section could not be rendered. "
+            "Try FPD_get_guidance('overview') for the section list."
+        )
 
 
 def register(mcp) -> None:

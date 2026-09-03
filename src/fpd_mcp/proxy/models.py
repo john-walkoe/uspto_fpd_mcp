@@ -10,6 +10,7 @@ pattern, L20). Whitelisting and length-capping the fields here closes both:
 nothing outside this schema can ever reach the registry or the page.
 """
 
+import re
 from typing import Optional, Union
 
 from pydantic import BaseModel, Field, field_validator
@@ -33,6 +34,17 @@ class RecentDownloadRegistration(BaseModel):
     download_id: Optional[str] = Field(None, max_length=64)
 
     model_config = {"extra": "ignore"}
+
+    @field_validator("download_url")
+    @classmethod
+    def validate_download_url_scheme(cls, v):
+        """L-10: this value becomes an anchor href on the downloads page, so a
+        javascript: or data: URI would execute on click. Any http(s) URL is
+        accepted because the registry legitimately holds both USPTO HTTPS
+        links and loopback proxy links."""
+        if not re.match(r"^https?://", v, re.IGNORECASE):
+            raise ValueError("download_url must be an http(s) URL")
+        return v
 
     @field_validator("page_count")
     @classmethod

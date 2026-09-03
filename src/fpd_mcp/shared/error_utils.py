@@ -20,12 +20,25 @@ def generate_request_id() -> str:
 def _generic_message_for_production(
     message: str, status_code: int, safe_message: str
 ) -> str:
-    """Map an error message/status code to a generic, production-safe message.
+    """Map a status code to a generic, production-safe message.
 
-    Falls back to `safe_message` (the already-sanitized message) when none of
-    the status/keyword overrides apply. Extracted from format_error_response
-    (mechanical decomposition, no behavior change) — same overrides, same
-    order.
+    Falls back to `safe_message` (the already-sanitized message) when the
+    status code has no override.
+
+    F-E7: the two keyword branches that used to sit at the bottom of this
+    ladder ("api"+"key" -> "Configuration error", "timeout" -> "Service
+    temporarily unavailable") are gone. They inspected `message`, the
+    PRE-sanitization string, and were unanchored substring tests applied at
+    any status code, so a USPTO 400 whose body named a field called "key"
+    came back as `{"error": "Configuration error", "status_code": 400}` and
+    any message containing "timeout" read as a service outage even on a 404.
+    Genericization is a status-code decision; prose is not load-bearing.
+
+    The 404 branch is deliberately absent: tools/petitions.py's
+    `_no_matches_to_empty` recognizes an empty USPTO result set by the 404
+    message, so adding one here would turn every empty search into an error
+    in production only. `message` is still taken so the signature is stable
+    for callers and so a future status-code branch can log what it replaced.
     """
     if status_code == 401:
         return "Authentication required"
@@ -35,10 +48,6 @@ def _generic_message_for_production(
         return "Rate limit exceeded"
     elif status_code >= 500:
         return "Internal server error occurred"
-    elif "api" in message.lower() and "key" in message.lower():
-        return "Configuration error"
-    elif "timeout" in message.lower():
-        return "Service temporarily unavailable"
     return safe_message
 
 
@@ -47,7 +56,8 @@ def format_error_response(
     status_code: int = 500,
     request_id: Optional[str] = None,
     context: Optional[Dict[str, Any]] = None,
-    include_details: Optional[bool] = None
+    include_details: Optional[bool] = None,
+    authored: bool = False
 ) -> Dict[str, Any]:
     """
     Format error response in consistent structure with sensitive data filtering
@@ -58,6 +68,10 @@ def format_error_response(
         request_id: Request identifier for tracing (optional)
         context: Additional context for debugging (optional)
         include_details: Whether to include detailed error info (auto-detected from env if None)
+        authored: True when `message` is server-written recovery text that
+            carries no upstream detail. Such messages skip the production
+            genericization (they are the answer, not a leak) but are still
+            sanitized. Use only for constant strings written in this repo.
 
     Returns:
         Dict containing structured error response
@@ -72,7 +86,7 @@ def format_error_response(
     safe_message = sanitizer.sanitize_string(message)
 
     # In production, provide generic messages for certain error types
-    if not include_details:
+    if not include_details and not authored:
         safe_message = _generic_message_for_production(message, status_code, safe_message)
 
     response = {
@@ -103,6 +117,43 @@ def is_upstream_server_error(response: Dict[str, Any]) -> bool:
         return False
     status_code = response.get("status_code")
     return isinstance(status_code, int) and status_code >= 500
+
+
+def document_not_located_response(
+    petition_result: Dict[str, Any],
+    petition_id: str,
+    document_identifier: str,
+    request_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Envelope for "the documentBag did not contain this document".
+
+    F-X3: the client marks a petition whose documentBag could not be
+    retrieved with `document_metadata_available: False` and a note saying
+    explicitly that an absent bag does NOT mean the petition has no
+    documents. Both the download tool and the extraction service then read an
+    empty bag and answered 404 "not found in petition", contradicting the
+    marker sitting in the object they were inspecting and ruling out the
+    caller's correct next action (retry later).
+
+    Returns 503 with an honest message when the marker says the metadata is
+    merely unavailable, and the original 404 otherwise.
+    """
+    if petition_result.get("document_metadata_available") is False:
+        return format_error_response(
+            "Document metadata is temporarily unavailable for this petition "
+            "(USPTO's petition-details documents endpoint is erroring "
+            "upstream), so this server cannot tell whether document "
+            f"{document_identifier} exists in petition {petition_id}. This is "
+            "NOT a statement that the document is absent. Retry later.",
+            503,
+            request_id,
+            authored=True,
+        )
+    return format_error_response(
+        f"Document {document_identifier} not found in petition {petition_id}",
+        404,
+        request_id,
+    )
 
 
 def sanitize_error_message(message: str) -> str:
@@ -141,8 +192,17 @@ class NotFoundError(FPDException):
 
 
 class RateLimitError(FPDException):
-    """Rate limit exceeded error (429)"""
-    def __init__(self, message: str, retry_after: int, request_id: Optional[str] = None):
+    """Rate limit exceeded error (429)
+
+    F-S6 (solid-principles, Liskov): `retry_after` used to be a REQUIRED
+    positional in the middle of the signature, while every sibling subclass
+    narrows to `(message, request_id=None)`. Code constructing "some
+    FPDException subclass" uniformly could not include this one, and the
+    status mapper had to special-case the 429 branch. It is keyword-only with
+    a default now, so the hierarchy is substitutable.
+    """
+    def __init__(self, message: str, request_id: Optional[str] = None,
+                 *, retry_after: int = 60):
         super().__init__(message, 429, request_id)
         self.retry_after = retry_after
 
@@ -172,10 +232,23 @@ def _handle_runtime_error(tool_name: str, e: RuntimeError) -> Dict[str, Any]:
 
 
 def _handle_generic_exception(tool_name: str, e: Exception) -> Dict[str, Any]:
-    """Catch-all Exception branch of async_tool_error_handler's wrapper,
-    extracted verbatim (mechanical decomposition, no behavior change)."""
-    # Check if httpx is available and handle HTTP errors
-    error_type = type(e).__name__
+    """Catch-all Exception branch of async_tool_error_handler's wrapper.
+
+    F-S4 (solid-principles, Open/Closed): this dispatched on
+    `type(e).__name__` string equality, so an httpx rename — or any subclass,
+    since `type(e).__name__` is exact and ignores the hierarchy — silently
+    degraded every HTTP error to a generic 500. httpx is a hard dependency of
+    this package, so `isinstance` against the real classes is available; the
+    string names are kept as a fallback only in case the import fails.
+    """
+    import httpx
+
+    if isinstance(e, httpx.HTTPStatusError):
+        error_type = "HTTPStatusError"
+    elif isinstance(e, httpx.TimeoutException):
+        error_type = "TimeoutException"
+    else:
+        error_type = type(e).__name__
 
     if error_type == "HTTPStatusError":
         # httpx.HTTPStatusError - preserve original status code

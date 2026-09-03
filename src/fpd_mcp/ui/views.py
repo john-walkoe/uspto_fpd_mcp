@@ -102,11 +102,25 @@ let currentSort = null;
 
 app.ontoolresult = (result) => {
   const text = result.content?.find(c => c.type === 'text')?.text;
-  try { render(JSON.parse(text)); }
+  try {
+    let data = JSON.parse(text);
+    if (data && typeof data === 'object' && typeof data.result === 'string') {
+      try { data = JSON.parse(data.result); } catch (unwrapErr) { /* keep wrapper */ }
+    }
+    render(data);
+  }
   catch(e) { showError('Could not parse search results: ' + e.message); }
 };
 
 app.connect();
+
+// M-12: USPTO applicant names, invention titles and decision-type text are
+// applicant-authored free text and every card below is built with innerHTML.
+// Same helper as ui/user_management_view.py, which had it and used it.
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g,
+    c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
 
 const d = (v) => (v ? String(v).split('T')[0] : '');
 
@@ -205,22 +219,22 @@ function buildCard(p) {
   const appNumClean = String(p.appNum || '').replace(/[,\/]/g, '');
 
   div.innerHTML = `
-    <div class="pet-id">${p.id}${p.decision ? `<span class="decision-badge decision-${p.decisionClass}">${p.decision}</span>` : ''}${p.petType ? `<span class="type-badge" title="${p.petType}">${p.petType.length > 44 ? p.petType.slice(0, 42) + '…' : p.petType}</span>` : ''}</div>
-    ${p.title ? `<div class="card-title" title="${p.title}">${p.title}</div>` : ''}
+    <div class="pet-id">${esc(p.id)}${p.decision ? `<span class="decision-badge decision-${esc(p.decisionClass)}">${esc(p.decision)}</span>` : ''}${p.petType ? `<span class="type-badge" title="${esc(p.petType)}">${esc(p.petType.length > 44 ? p.petType.slice(0, 42) + '…' : p.petType)}</span>` : ''}</div>
+    ${p.title ? `<div class="card-title" title="${esc(p.title)}">${esc(p.title)}</div>` : ''}
     <div class="meta">
-      <div class="meta-item"><span class="meta-label">Applicant</span><span class="meta-val" title="${p.applicant}">${p.applicant}</span></div>
-      <div class="meta-item"><span class="meta-label">Petition Mailed</span><span class="meta-val">${p.mailed || '—'}</span></div>
-      <div class="meta-item"><span class="meta-label">Decided</span><span class="meta-val">${p.decided || '—'}</span></div>
-      ${p.appNum ? `<div class="meta-item"><span class="meta-label">Application</span><span class="meta-val">${p.appNum}</span></div>` : ''}
-      ${p.patentNum ? `<div class="meta-item"><span class="meta-label">Patent</span><span class="meta-val">${p.patentNum}</span></div>` : ''}
-      ${p.artUnit ? `<div class="meta-item"><span class="meta-label">Art Unit</span><span class="meta-val">${p.artUnit}</span></div>` : ''}
-      ${p.tc ? `<div class="meta-item"><span class="meta-label">Tech Center</span><span class="meta-val">${p.tc}</span></div>` : ''}
-      ${p.office ? `<div class="meta-item"><span class="meta-label">Deciding Office</span><span class="meta-val" title="${p.office}">${p.office}</span></div>` : ''}
-      ${p.rules ? `<div class="meta-item"><span class="meta-label">Rules</span><span class="meta-val" title="${p.rules}">${p.rules}</span></div>` : ''}
+      <div class="meta-item"><span class="meta-label">Applicant</span><span class="meta-val" title="${esc(p.applicant)}">${esc(p.applicant)}</span></div>
+      <div class="meta-item"><span class="meta-label">Petition Mailed</span><span class="meta-val">${esc(p.mailed) || '—'}</span></div>
+      <div class="meta-item"><span class="meta-label">Decided</span><span class="meta-val">${esc(p.decided) || '—'}</span></div>
+      ${p.appNum ? `<div class="meta-item"><span class="meta-label">Application</span><span class="meta-val">${esc(p.appNum)}</span></div>` : ''}
+      ${p.patentNum ? `<div class="meta-item"><span class="meta-label">Patent</span><span class="meta-val">${esc(p.patentNum)}</span></div>` : ''}
+      ${p.artUnit ? `<div class="meta-item"><span class="meta-label">Art Unit</span><span class="meta-val">${esc(p.artUnit)}</span></div>` : ''}
+      ${p.tc ? `<div class="meta-item"><span class="meta-label">Tech Center</span><span class="meta-val">${esc(p.tc)}</span></div>` : ''}
+      ${p.office ? `<div class="meta-item"><span class="meta-label">Deciding Office</span><span class="meta-val" title="${esc(p.office)}">${esc(p.office)}</span></div>` : ''}
+      ${p.rules ? `<div class="meta-item"><span class="meta-label">Rules</span><span class="meta-val" title="${esc(p.rules)}">${esc(p.rules)}</span></div>` : ''}
     </div>
     <div class="actions">
-      ${gpUrl ? `<button class="btn btn-primary" data-gp="${gpUrl}">Google Patents →</button>` : ''}
-      ${appNumClean ? `<button class="btn btn-secondary" data-app="${appNumClean}">Patent Center →</button>` : ''}
+      ${gpUrl ? `<button class="btn btn-primary" data-gp="${esc(gpUrl)}">Google Patents →</button>` : ''}
+      ${appNumClean ? `<button class="btn btn-secondary" data-app="${esc(appNumClean)}">Patent Center →</button>` : ''}
     </div>
   `;
 
@@ -376,7 +390,7 @@ function makePill(label, count, dim, val) {
   pill.className = 'pill';
   pill.dataset.dim = dim;
   pill.dataset.val = val;
-  pill.innerHTML = `${label} <span class="pill-count">${count}</span>`;
+  pill.innerHTML = `${esc(label)} <span class="pill-count">${Number(count)}</span>`;
   pill.addEventListener('click', () => {
     if (activeFilters[dim] === val) {
       activeFilters[dim] = null;
@@ -521,7 +535,10 @@ let proxyBaseUrl = 'http://localhost:8081';
 app.ontoolresult = (result) => {
   try {
     const text = result.content?.find(c => c.type === 'text')?.text;
-    const data = JSON.parse(text);
+    let data = JSON.parse(text);
+    if (data && typeof data === 'object' && typeof data.result === 'string') {
+      try { data = JSON.parse(data.result); } catch (unwrapErr) { /* keep wrapper */ }
+    }
     const now = new Date().toISOString();
 
     // FPD_get_document_download result shape
@@ -546,6 +563,14 @@ app.ontoolresult = (result) => {
 };
 
 app.connect();
+
+// M-12: USPTO applicant names, invention titles and decision-type text are
+// applicant-authored free text and every card below is built with innerHTML.
+// Same helper as ui/user_management_view.py, which had it and used it.
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g,
+    c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
 
 // Delegated click handler — use app.openLink() so Claude Desktop opens the
 // URL in the system browser, bypassing iframe sandbox restrictions (Lesson 24).
@@ -609,16 +634,16 @@ function buildCard(doc) {
   div.innerHTML = `
     <div class="doc-icon">📋</div>
     <div class="doc-info">
-      <div class="doc-title" title="${doc.title}">${doc.title || 'Document'}</div>
+      <div class="doc-title" title="${esc(doc.title)}">${esc(doc.title) || 'Document'}</div>
       <div class="doc-meta">
         <span class="doc-type-badge">petition</span>
-        <span>${doc.petition_id || '—'}</span>
+        <span>${esc(doc.petition_id) || '—'}</span>
       </div>
       <div class="doc-actions">
-        <button class="btn btn-download" data-url="${doc.proxy_url}">Download PDF</button>
+        <button class="btn btn-download" data-url="${esc(doc.proxy_url)}">Download PDF</button>
       </div>
     </div>
-    ${time ? `<div class="timestamp">${time}</div>` : ''}
+    ${time ? `<div class="timestamp">${esc(time)}</div>` : ''}
   `;
 
   return div;

@@ -16,6 +16,8 @@ repos:
           - '\.md$'
           - '--exclude-files'
           - 'package-lock\.json'
+          - '--exclude-files'
+          - '\.baseline$'
         exclude: ^\.secrets\.baseline$
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -33,8 +35,26 @@ repos:
       - id: check-merge-conflict
       - id: detect-private-key
 
+  # Q-1: the C901 complexity gate, the mypy config and a ~15-second test
+  # suite were all committed and none of them ran automatically — the only
+  # two workflows were security scanners. ruff runs per commit; pytest runs
+  # on push, where 15 seconds is affordable.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.21
+    hooks:
+      - id: ruff
+        args: [--config, pyproject.toml]
+        files: ^src/
+
   - repo: local
     hooks:
+      - id: pytest
+        name: pytest (fast suite)
+        entry: uv run pytest -q
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+
       - id: prompt-injection-check
         name: Check for prompt injection patterns (Unicode steganography & FPD attacks)
         entry: uv run python .security/check_prompt_injections.py

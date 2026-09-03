@@ -1,5 +1,7 @@
 """Complete Portfolio Due Diligence - Lifecycle risk assessment requiring PFW + PTAB MCPs"""
 
+from ._flags import flag
+
 
 async def complete_portfolio_due_diligence_prompt(
     company_name: str,
@@ -20,6 +22,10 @@ async def complete_portfolio_due_diligence_prompt(
 
     Returns complete patent lifecycle analysis: Filing -> Prosecution -> Petitions -> Grant -> PTAB with integrated risk assessment.
     """
+    # R-2: accept any encoding a caller sends (True, 'True', 'yes',
+    # '1'); the emitted template compares the normalized literal.
+    risk_scoring = flag(risk_scoring)
+
     return f"""Complete Portfolio Due Diligence - Three-MCP Lifecycle Analysis
 
 Inputs Provided:
@@ -51,7 +57,7 @@ try:
     print("**PHASE 1: Discovering Portfolio via PFW MCP...**\\n")
 
     # Get company applications with targeted fields
-    pfw_results = pfw_search_applications_minimal(
+    pfw_results = PFW_search_applications_minimal(
         applicant_name="{company_name}",
         fields=['applicationNumberText', 'patentNumber', 'inventionTitle',
                 'applicationStatusDescription', 'applicationMetaData.firstApplicantName',
@@ -112,7 +118,7 @@ for app in portfolio_data['applications'][:50]:
     app_num = app.get('applicationNumberText')
 
     try:
-        petitions = fpd_search_petitions_by_application(
+        petitions = FPD_Search_petitions_by_application(
             application_number=app_num,
             include_documents=False
         )
@@ -137,7 +143,7 @@ for app in portfolio_data['applications'][:50]:
 
                 # Get petition type from details
                 try:
-                    details = fpd_get_petition_details(petition_id=petition_id, include_documents=False)
+                    details = FPD_Get_petition_details(petition_id=petition_id, include_documents=False)
                     rules = details.get('ruleBag', [])
 
                     # Categorize by type
@@ -187,7 +193,7 @@ for patent in portfolio_data['granted_patents'][:30]:  # Limit to 30 to prevent 
     patent_num = patent.get('patentNumber')
 
     try:
-        ptab_proceedings = search_trials_minimal(
+        ptab_proceedings = PTAB_search_trials_minimal(
             patent_number=patent_num
         )
 
@@ -326,7 +332,7 @@ else:
 Step 1: Get company patent portfolio using Patent File Wrapper MCP with targeted fields:
 ```python
 # CRITICAL: Use fields parameter for efficient portfolio discovery
-pfw_search_applications_minimal(
+PFW_search_applications_minimal(
     query='firstApplicantName:"{company_name}"',
     fields=[
         'applicationNumberText',
@@ -355,7 +361,7 @@ Step 2: Categorize applications by status:
 Step 3: Cross-reference portfolio with petition history:
 For each application found in Phase 1:
 ```
-fpd_search_petitions_by_application(
+FPD_Search_petitions_by_application(
     application_number=app_number,
     include_documents=False
 )
@@ -383,7 +389,7 @@ WARNING: MODERATE RED FLAGS (Monitor Closely):
 Step 4: PTAB vulnerability analysis for granted patents:
 For each granted patent:
 ```
-search_trials_minimal(
+PTAB_search_trials_minimal(
     patent_number=patent_number
 )
 ```
@@ -458,7 +464,7 @@ Predictive Analytics:
 - PTAB vulnerability prediction model
 - Petition red flag early warning system
 - Portfolio risk trend analysis
-- Cost-benefit optimization recommendations
+- Prioritization recommendations for follow-up analysis
 
 ** TRIPLE-MCP INTEGRATION**: This workflow showcases the power of combining Patent File Wrapper (prosecution), Final Petition Decisions (procedural), and PTAB (post-grant) data for unprecedented portfolio intelligence.
 

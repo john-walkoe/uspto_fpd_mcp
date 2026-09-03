@@ -3,8 +3,8 @@
 This directory contains the test scripts for the USPTO Final Petition Decisions MCP Server.
 
 **Start with [`TEST_SUITE.md`](TEST_SUITE.md)** — the manual end-to-end
-suite for the FastMCP 3.0 server (search views, persistent downloads,
-centralized proxy, elicitation, HTTP mode), with live-validated anchors.
+suite for the FastMCP 4.0.1 server (search views, persistent downloads,
+centralized proxy, HTTP mode), with live-validated anchors.
 
 **Automated tests:** plain `uv run pytest` is now safe.
 `test_unified_key_management.py` and `test_unified_storage.py` are excluded via
@@ -20,14 +20,14 @@ too). Only run them deliberately with
 The server provides these tools for petition research:
 
 ### Search Tools
-- **`Search_petitions_minimal`** - Minimal fields (95-99% context reduction)
-- **`Search_petitions_balanced`** - Balanced fields (80-88% context reduction)
-- **`Search_petitions_by_art_unit`** - Art unit quality assessment with date range filtering
-- **`Search_petitions_by_application`** - Complete petition history for specific application
+- **`FPD_Search_petitions_minimal`** - Minimal fields (95-99% context reduction)
+- **`FPD_Search_petitions_balanced`** - Balanced fields (80-88% context reduction)
+- **`FPD_Search_petitions_by_art_unit`** - Art unit quality assessment with date range filtering
+- **`FPD_Search_petitions_by_application`** - Complete petition history for specific application
 
 ### Document & Detail Tools
-- **`Get_petition_details`** - Full petition details by UUID with optional documentBag
-- **`FPD_get_document_content_with_mistral_ocr`** - Intelligent text extraction with hybrid PyPDF2/Mistral OCR
+- **`FPD_Get_petition_details`** - Full petition details by UUID with optional documentBag
+- **`FPD_get_document_content_with_ocr`** - Intelligent text extraction: native `pypdf` text layer first, OCR (Mistral or self-hosted Docling) for scanned pages
 - **`FPD_get_document_download`** - Secure browser-accessible download URLs
 
 ### Utility Tools
@@ -62,7 +62,7 @@ export MISTRAL_API_KEY=your_mistral_api_key_here_OPTIONAL
 **Option 2: Testing Without Real API Key**
 If you don't have a USPTO API key yet, the test files will automatically use a test key for basic functionality testing. However, actual API calls will fail without a real key.
 
-**Note:** The MISTRAL_API_KEY is optional. Without it, document extraction uses free PyPDF2 (works for text-based PDFs). With it, OCR capabilities are available for scanned documents (~$0.001/page cost).
+**Note:** The MISTRAL_API_KEY is optional. Without it, document extraction reads the PDF's native text layer with `pypdf`, which covers text-based PDFs. Add it, or set `DOCLING_SERVE_URL` to a self-hosted Docling backend, to OCR scanned documents.
 
 **Secure Storage:** API keys can be stored securely using Windows DPAPI (preferred) or environment variables (fallback). The secure storage automatically encrypts keys and eliminates the need to set environment variables each session.
 

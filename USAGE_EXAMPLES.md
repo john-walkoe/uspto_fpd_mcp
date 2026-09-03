@@ -28,7 +28,7 @@ Sample requests that the user can give to the LLM to trigger the examples are as
 - *"Identify problematic art units with high examiner disputes"*
 
 **Example 4 - Application Petition History:**
-- *"Get me the petition history for application 17896175"*
+- *"Get me the petition history for application 17414168"*
 - *"Did this application have any procedural issues during prosecution?"*
 - *"Check if this patent had petition red flags"*
 
@@ -60,13 +60,13 @@ Sample requests that the user can give to the LLM to trigger the examples are as
 
 ```python
 # Find all petitions filed by a company
-result = Search_petitions_minimal(
+result = FPD_Search_petitions_minimal(
     query='firstApplicantName:"TechCorp Inc"',
     limit=50
 )
 
-print(f"Found {result['recordTotalQuantity']} petitions")
-for petition in result['results']:
+print(f"Found {result['count']} petitions")
+for petition in result['petitionDecisionDataBag']:
     print(f"App {petition['applicationNumberText']}: {petition['decisionTypeCodeDescriptionText']}")
     print(f"  Filed: {petition['petitionMailDate']} | Decided: {petition['decisionDate']}")
 ```
@@ -75,13 +75,13 @@ for petition in result['results']:
 
 ```python
 # Find all revival petitions under 37 CFR 1.137
-revival_petitions = Search_petitions_balanced(
+revival_petitions = FPD_Search_petitions_balanced(
     query='ruleBag:"37 CFR 1.137"',
     limit=20
 )
 
-print(f"Found {len(revival_petitions['results'])} revival petitions")
-for petition in revival_petitions['results']:
+print(f"Found {len(revival_petitions['petitionDecisionDataBag'])} revival petitions")
+for petition in revival_petitions['petitionDecisionDataBag']:
     status = petition['decisionTypeCodeDescriptionText']
     print(f"App {petition['applicationNumberText']}: {status}")
     print(f"  Inventor: {petition['firstApplicantName']}")
@@ -93,7 +93,7 @@ for petition in revival_petitions['results']:
 
 ```python
 # Analyze petition patterns for a specific art unit
-art_unit_petitions = Search_petitions_by_art_unit(
+art_unit_petitions = FPD_Search_petitions_by_art_unit(
     art_unit="2128",
     date_range="2020-01-01:2024-12-31",
     limit=50
@@ -101,7 +101,7 @@ art_unit_petitions = Search_petitions_by_art_unit(
 
 # Count petition types
 petition_types = {}
-for petition in art_unit_petitions['results']:
+for petition in art_unit_petitions['petitionDecisionDataBag']:
     petition_type = petition.get('decisionPetitionTypeCodeDescriptionText', 'Unknown')
     petition_types[petition_type] = petition_types.get(petition_type, 0) + 1
 
@@ -114,21 +114,21 @@ for ptype, count in sorted(petition_types.items(), key=lambda x: x[1], reverse=T
 
 ```python
 # Get complete petition history for an application
-petition_history = Search_petitions_by_application(
-    application_number="17896175",
+petition_history = FPD_Search_petitions_by_application(
+    application_number="17414168",
     include_documents=False
 )
 
-if petition_history['recordTotalQuantity'] == 0:
+if petition_history['count'] == 0:
     print("✅ No petitions - normal prosecution")
-elif petition_history['recordTotalQuantity'] == 1:
+elif petition_history['count'] == 1:
     print("⚠️ One petition - review details")
-    petition = petition_history['results'][0]
+    petition = petition_history['petitionDecisionDataBag'][0]
     print(f"  Type: {petition['decisionPetitionTypeCodeDescriptionText']}")
     print(f"  Outcome: {petition['decisionTypeCodeDescriptionText']}")
 else:
-    print(f"🚨 Multiple petitions ({petition_history['recordTotalQuantity']}) - red flag!")
-    for petition in petition_history['results']:
+    print(f"🚨 Multiple petitions ({petition_history['count']}) - red flag!")
+    for petition in petition_history['petitionDecisionDataBag']:
         print(f"  {petition['decisionPetitionTypeCodeDescriptionText']}: {petition['decisionTypeCodeDescriptionText']}")
 ```
 
@@ -136,18 +136,18 @@ else:
 
 ```python
 # Find all supervisory review petitions (examiner disputes)
-examiner_disputes = Search_petitions_balanced(
+examiner_disputes = FPD_Search_petitions_balanced(
     query='ruleBag:"37 CFR 1.181"',
     limit=30
 )
 
 # Count granted vs denied
-granted = sum(1 for p in examiner_disputes['results'] if p['decisionTypeCodeDescriptionText'] == 'GRANTED')
-denied = sum(1 for p in examiner_disputes['results'] if p['decisionTypeCodeDescriptionText'] == 'DENIED')
+granted = sum(1 for p in examiner_disputes['petitionDecisionDataBag'] if p['decisionTypeCodeDescriptionText'] == 'GRANTED')
+denied = sum(1 for p in examiner_disputes['petitionDecisionDataBag'] if p['decisionTypeCodeDescriptionText'] == 'DENIED')
 
 print(f"Examiner Dispute Petitions (37 CFR 1.181):")
-print(f"  Granted: {granted} ({granted/len(examiner_disputes['results'])*100:.1f}%)")
-print(f"  Denied: {denied} ({denied/len(examiner_disputes['results'])*100:.1f}%)")
+print(f"  Granted: {granted} ({granted/len(examiner_disputes['petitionDecisionDataBag'])*100:.1f}%)")
+print(f"  Denied: {denied} ({denied/len(examiner_disputes['petitionDecisionDataBag'])*100:.1f}%)")
 print(f"  Director overturn rate: {granted/(granted+denied)*100:.1f}%")
 ```
 
@@ -155,16 +155,16 @@ print(f"  Director overturn rate: {granted/(granted+denied)*100:.1f}%")
 
 ```python
 # First, find a petition
-search_result = Search_petitions_minimal(
+search_result = FPD_Search_petitions_minimal(
     query='firstApplicantName:"Acme Corp"',
     limit=1
 )
 
-if search_result['results']:
-    petition_id = search_result['results'][0]['petitionDecisionRecordIdentifier']
+if search_result['petitionDecisionDataBag']:
+    petition_id = search_result['petitionDecisionDataBag'][0]['petitionDecisionRecordIdentifier']
 
     # Get complete petition details
-    details = Get_petition_details(
+    details = FPD_Get_petition_details(
         petition_id=petition_id,
         include_documents=True
     )
@@ -186,7 +186,7 @@ if search_result['results']:
 
 ```python
 # Get petition details with documents
-details = Get_petition_details(
+details = FPD_Get_petition_details(
     petition_id="uuid-from-search",
     include_documents=True
 )
@@ -206,16 +206,16 @@ if 'documentBag' in details:
 
 ```python
 # Find all denied petitions for risk assessment
-denied = Search_petitions_balanced(
+denied = FPD_Search_petitions_balanced(
     query='decisionTypeCodeDescriptionText:DENIED',
     limit=50
 )
 
-print(f"Denied Petition Analysis ({len(denied['results'])} petitions):")
+print(f"Denied Petition Analysis ({len(denied['petitionDecisionDataBag'])} petitions):")
 
 # Group by petition type
 denial_by_type = {}
-for petition in denied['results']:
+for petition in denied['petitionDecisionDataBag']:
     ptype = petition.get('decisionPetitionTypeCodeDescriptionText', 'Unknown')
     denial_by_type[ptype] = denial_by_type.get(ptype, 0) + 1
 
@@ -227,20 +227,20 @@ for ptype, count in sorted(denial_by_type.items(), key=lambda x: x[1], reverse=T
 
 ```python
 # Stage 1: Fast discovery with minimal fields
-discovery = Search_petitions_minimal(
+discovery = FPD_Search_petitions_minimal(
     query='firstApplicantName:"Innovate Inc"',
     limit=100
 )
 
-print(f"Stage 1: Found {discovery['recordTotalQuantity']} petitions")
+print(f"Stage 1: Found {discovery['count']} petitions")
 
 # Stage 2: User selects 5 petitions of interest (based on dates, outcome, etc.)
-selected_ids = [p['petitionDecisionRecordIdentifier'] for p in discovery['results'][:5]]
+selected_ids = [p['petitionDecisionRecordIdentifier'] for p in discovery['petitionDecisionDataBag'][:5]]
 
 # Stage 3: Get detailed analysis for selected petitions
 print("\nStage 2: Detailed analysis of selected petitions:")
 for petition_id in selected_ids:
-    details = Get_petition_details(
+    details = FPD_Get_petition_details(
         petition_id=petition_id,
         include_documents=True
     )
@@ -259,17 +259,17 @@ for petition_id in selected_ids:
 
 ```python
 # Find petitions for a company
-petitions = Search_petitions_minimal(
+petitions = FPD_Search_petitions_minimal(
     query='firstApplicantName:"Acme Corp"',
     limit=30
 )
 
 # For each petition, get prosecution history from PFW MCP
-for petition in petitions['results']:
+for petition in petitions['petitionDecisionDataBag']:
     app_number = petition['applicationNumberText']
 
     # Get prosecution history from Patent File Wrapper MCP
-    prosecution = pfw_search_applications_balanced(
+    prosecution = PFW_search_applications_balanced(
         query=f'applicationNumberText:{app_number}',
         limit=1
     )
@@ -292,25 +292,25 @@ for petition in petitions['results']:
 
 ```python
 # Find revival petitions
-revivals = Search_petitions_balanced(
+revivals = FPD_Search_petitions_balanced(
     query='ruleBag:"37 CFR 1.137"',
     limit=20
 )
 
 # Check if revived patents faced PTAB challenges
-for petition in revivals['results']:
+for petition in revivals['petitionDecisionDataBag']:
     patent_number = petition.get('patentNumber')
 
     if patent_number:
         # Check PTAB MCP for post-grant challenges
-        ptab_proceedings = ptab_search_proceedings_minimal(
+        ptab_proceedings = PTAB_search_trials_minimal(
             patent_number=patent_number
         )
 
         print(f"\nPatent {patent_number}:")
         print(f"  Revival petition: {petition['decisionTypeCodeDescriptionText']}")
 
-        if ptab_proceedings['recordTotalQuantity'] > 0:
+        if ptab_proceedings['count'] > 0:
             print(f"  🚨 PTAB Challenge Found!")
             print(f"  Hypothesis: Revival petition → difficult prosecution → PTAB vulnerability")
         else:
@@ -323,7 +323,7 @@ for petition in revivals['results']:
 # Complete patent lifecycle: Filing → Prosecution → Petitions → Grant → PTAB
 
 # Step 1: Find company's patents from PFW
-patents = pfw_search_applications_balanced(
+patents = PFW_search_applications_balanced(
     query='firstApplicantName:"Target Company"',
     limit=50
 )
@@ -335,7 +335,7 @@ for patent in patents['applications']:
     patent_number = patent.get('patentNumber')
 
     # Step 2: Check FPD for petition history
-    petitions = Search_petitions_by_application(
+    petitions = FPD_Search_petitions_by_application(
         application_number=app_number,
         include_documents=False
     )
@@ -343,17 +343,17 @@ for patent in patents['applications']:
     # Step 3: If granted, check PTAB for challenges
     ptab_count = 0
     if patent_number:
-        ptab_proceedings = ptab_search_proceedings_minimal(
+        ptab_proceedings = PTAB_search_trials_minimal(
             patent_number=patent_number
         )
-        ptab_count = ptab_proceedings['recordTotalQuantity']
+        ptab_count = ptab_proceedings['count']
 
     # Compile lifecycle data
     lifecycle_analysis.append({
         'app_number': app_number,
         'patent_number': patent_number or 'Pending',
         'status': patent['applicationStatusDescriptionText'],
-        'petition_count': petitions['recordTotalQuantity'],
+        'petition_count': petitions['count'],
         'ptab_challenge_count': ptab_count,
         'examiner': patent.get('examinerNameText', 'N/A'),
         'art_unit': patent.get('groupArtUnitNumber', 'N/A')
@@ -386,13 +386,18 @@ for item in lifecycle_analysis:
 guidance = FPD_get_guidance(section="overview")
 
 # Available sections:
-# - "overview": General tool overview and workflows
-# - "tools": All 8 tools and their use cases
-# - "red_flags": Red flag identification patterns
-# - "documents": Document download workflows
+# - "overview": Available sections and MCP overview (default)
+# - "tools": Tool catalog, progressive disclosure, parameters
+# - "red_flags": Red flag identification patterns and CFR rules
+# - "documents": Document extraction, downloads, proxy configuration
+# - "extraction": Extraction-tier selection for speed and quality
+# - "limits": Active response-size budgets, the _bounds/_window markers, paging
+# - "coverage": Dataset coverage bounds (2001+ filings; decisions data from 2022)
 # - "workflows_pfw": PFW MCP integration patterns
 # - "workflows_ptab": PTAB MCP integration patterns
-# - "workflows_complete": Complete portfolio due diligence
+# - "workflows_citations": Citations MCP integration patterns
+# - "workflows_complete": Four-MCP complete lifecycle analysis
+# - "workflows_assistant": Pinecone Assistant + FPD research workflows
 # - "ultra_context": Ultra-minimal context workflows
 
 print(guidance)
@@ -402,16 +407,16 @@ print(guidance)
 
 ### Available Search Tools (4 Tools):
 
-1. **Search_petitions_minimal** - Ultra-fast petition discovery (50-100 petitions, 95-99% context reduction)
-2. **Search_petitions_balanced** - Detailed petition analysis (10-20 petitions, 80-88% context reduction)
-3. **Search_petitions_by_art_unit** - Art unit quality assessment with date range filtering
-4. **Search_petitions_by_application** - Complete petition history for specific application
+1. **FPD_Search_petitions_minimal** - Ultra-fast petition discovery (50-100 petitions, 95-99% context reduction)
+2. **FPD_Search_petitions_balanced** - Detailed petition analysis (10-20 petitions, 80-88% context reduction)
+3. **FPD_Search_petitions_by_art_unit** - Art unit quality assessment with date range filtering
+4. **FPD_Search_petitions_by_application** - Complete petition history for specific application
 
 ### Detail & Document Tools (3 Tools):
 
-5. **Get_petition_details** - Full petition details by UUID with optional documentBag
+5. **FPD_Get_petition_details** - Full petition details by UUID with optional documentBag
 6. **FPD_get_document_download** - Browser-accessible PDF download URLs
-7. **FPD_get_document_content_with_mistral_ocr** - OCR text extraction from petition documents
+7. **FPD_get_document_content_with_ocr** - OCR text extraction from petition documents
 
 ### Guidance Tool (1 Tool):
 
@@ -493,10 +498,10 @@ query='firstApplicantName:"Acme" AND decisionTypeCodeDescriptionText:DENIED AND 
 
 ### Context Reduction Strategy:
 
-1. **Discovery (Minimal):** Use `Search_petitions_minimal` for initial exploration (50-100 results)
+1. **Discovery (Minimal):** Use `FPD_Search_petitions_minimal` for initial exploration (50-100 results)
 2. **Selection:** User reviews results and selects 3-5 petitions of interest
-3. **Analysis (Balanced):** Use `Search_petitions_balanced` or `Search_petitions_by_application` for detailed review (10-20 results)
-4. **Details:** Use `Get_petition_details` for 1-5 selected petitions (full data)
+3. **Analysis (Balanced):** Use `FPD_Search_petitions_balanced` or `FPD_Search_petitions_by_application` for detailed review (10-20 results)
+4. **Details:** Use `FPD_Get_petition_details` for 1-5 selected petitions (full data)
 5. **Documents:** Use `FPD_get_document_download` only when user needs PDFs
 
 **Token Savings:** This progressive approach reduces context by ~93% compared to fetching full data upfront.

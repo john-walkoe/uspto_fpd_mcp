@@ -99,26 +99,30 @@ The PowerShell script will:
   - When PFW MCP is installed, FPD automatically uses PFW's centralized proxy (port `8080`), but will fall back to FPD's local proxy port
   - **Centralized Proxy Benefits**: Single port for all USPTO MCPs, 7-day persistent links, unified rate limiting
 
-## 🚀 FastMCP 3.0 (migrated 2026-07)
+## 🚀 FastMCP 4.0
 
-The server runs on **FastMCP 3.0** with MCP Apps (petition search cards +
-recent-downloads panel render as iframes in Claude Desktop), progress
-notifications during OCR, 7-day persistent download links, dual STDIO/HTTP
-transport, and a Dockerfile for containerized deployment.
+The server runs on **FastMCP 4.0.1** (`fastmcp[apps]>=4.0.0,<5.0.0`) over the
+**MCP Python SDK 2.x**, speaking MCP protocol revision **2026-07-28**. It ships
+MCP Apps (petition search cards + recent-downloads panel render as iframes in
+Claude Desktop), progress notifications during document extraction, 7-day
+persistent download links, dual STDIO/HTTP transport, and a Dockerfile for
+containerized deployment.
 
 **Environment variables:**
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `USPTO_API_KEY` | — | **Required.** USPTO ODP API key |
-| `MISTRAL_API_KEY` | unset | Enables Mistral OCR tier (~$0.001/page) |
-| `MISTRAL_OCR_DAILY_BUDGET_USD` | unset (unlimited) | Cumulative daily spend ceiling for Mistral OCR calls; resets at UTC midnight |
-| `DOCLING_SERVE_URL` | unset | Enables Docling OCR tier (e.g. `https://docling.example.com`) |
+| `MISTRAL_API_KEY` | unset | Optional. Enables the Mistral OCR tier for scanned documents |
+| `MISTRAL_OCR_MAX_PAGES` | `50` | Per-document page cap for the Mistral OCR tier; a capped extraction is always marked |
+| `MISTRAL_OCR_DAILY_BUDGET_USD` | `5.00` | Daily (UTC) ceiling on metered Mistral OCR usage. Unset uses the built-in default; `0` opts out |
+| `DOCLING_SERVE_URL` | unset | Enables the self-hosted Docling OCR tier (e.g. `https://docling.example.com`) |
 | `DOCLING_TIMEOUT` | `300` | Docling read timeout (seconds) |
 | `DOCLING_MAX_PAGES` | `25` | Skip Docling above this page count (petition decisions are short) |
 | `FASTMCP_TRANSPORT` | `stdio` | `stdio` (Claude Desktop) or `http` (Docker/claude.ai) |
 | `FASTMCP_HOST` | `127.0.0.1` | HTTP bind address |
 | `FASTMCP_PORT` | `8000` | HTTP port (cluster convention: fpd = **8005**) |
+| `FASTMCP_STATELESS_HTTP` | `true` | Stateless streamable HTTP: no server-side session table, every request self-contained. Required for clients that don't replay `mcp-session-id` (GitHub Copilot) and for load-balanced / multi-replica deploys. Stateful clients still work — they just get an ephemeral session per request. |
 | `CORS_EXTRA_ORIGIN` | unset | Extra CORS origins for HTTP mode (e.g. `https://claude.ai`) |
 | `INTERNAL_AUTH_SECRET` | unset | **Required in HTTP mode** (X-API-KEY auth); also signs centralized-proxy JWTs — must match PFW's |
 | `ENABLE_PROXY_SERVER` | `true` | Enable the local download proxy |
@@ -152,6 +156,33 @@ transport, and a Dockerfile for containerized deployment.
 | `USPTO_SHARED_RATE_LIMIT_DIR` | unset | Enable cross-process rate limiter; bind-mounted directory (unset = disabled) |
 | `USPTO_SHARED_RATE_LIMIT_RPS` | `4.0` | Token bucket rate (tokens/sec, shared across all 4 USPTO MCPs) |
 | `USPTO_SHARED_MAX_CONCURRENT` | `2` | Concurrency slots (shared in-flight requests across all 4 MCPs) |
+| `USPTO_MAX_RESPONSE_CHARS` | `40000` | Character budget for structured tool responses (searches, petition details) |
+| `USPTO_MAX_CONTENT_CHARS` | `120000` | Character budget for document-content responses |
+| `USPTO_RESPONSE_BOUNDS_ENABLED` | `true` | `false` disables the response-size guard entirely |
+| `FPD_TOOL_DEADLINE_SECONDS` | `150` | Overall deadline for one content-extraction tool call |
+| `FPD_MAX_PDF_BYTES` | `26214400` | Per-document extraction byte cap (25MB) |
+| `FPD_MAX_EGRESS_PDF_BYTES` | `104857600` | Cap on a PDF streamed through the download proxy (100MB) |
+| `FPD_MAX_MCP_BODY_BYTES` | `4194304` | Request body cap on the `/mcp` surface |
+| `FPD_TRUSTED_PROXY_IPS` | unset | Reverse-proxy addresses (IP/CIDR) whose `X-Forwarded-For` is honored |
+| `ENVIRONMENT` | unset (production) | `development` / `dev` / `test` enable detailed error envelopes |
+
+### Response-size markers
+
+Tool responses are measured in **characters** (`len(json.dumps(...))`), not
+token estimates, because an oversized result is replaced client-side with a
+truncation error the server never sees. Every search envelope carries a
+`paging` block (`limit_requested`, `limit_applied`, `offset`, `returned`,
+`total`, `has_more`, `next_offset`). Three further markers appear **only when
+they applied** and are absent entirely on a no-op:
+
+| Marker | Meaning |
+|--------|---------|
+| `limit_clamped` | `{requested, applied, note}`. The search ceiling (100) reduced the requested limit rather than rejecting it |
+| `_bounds` | `{applied, reason, size_chars, size_limit, stages, slimmed_fields, items_returned, items_total, note}`. A structured response was slimmed and/or truncated to fit the budget |
+| `_window` | `{unit, offset, returned, total, has_more, next_offset, note}`. Document content was paged rather than dropped; all counters are in characters. Page it with `char_offset` / `max_chars` on `FPD_get_document_content_with_ocr` |
+
+`FPD_get_guidance(section="limits")` prints the live budgets and this marker
+contract at runtime.
 
 **Testing:** see [`tests/TEST_SUITE.md`](tests/TEST_SUITE.md) for the manual
 end-to-end suite; automated tests via plain `uv run pytest` (the
@@ -165,12 +196,12 @@ excluded via `addopts` in `pyproject.toml` and additionally gated by
 - **🎯Context Reduction** - Get focused responses instead of massive API dumps (80-99% reduction)
 - **📊Progressive Disclosure Strategy** - Minimal discovery → Balanced analysis → Document extraction
 - **🔍Petition-Type Focused Search** - Specialized tools for art unit and application-specific searches
-- **✨Intelligent Document Extraction** - Auto-optimized hybrid extraction (free PyPDF2 → Mistral OCR fallback) with secure browser downloads
+- **✨Intelligent Document Extraction** - Auto-optimized hybrid extraction (native `pypdf` text layer → OCR fallback for scanned pages) with secure browser downloads
 - **🆕Centralized Proxy Integration** - Auto-detects PFW MCP and uses unified proxy (port 8080) for persistent links and cross-MCP downloads
 - **🌐Secure Browser Downloads** - Click proxy URLs to download PDFs directly while keeping API keys secure
 - **👁️Advanced OCR Capabilities** - Extract text from scanned PDFs using Mistral OCR when needed
 - **📁 Document Bag Integration** - Full petition document access alongside structured petition data
-- **💰Mistral OCR Cost Transparency** - Real-time cost calculation when using Mistral OCR
+- **Extraction Method Transparency** - Reports which extraction method was used for every document
 - **🔐 Secure API Key Storage** - Optional Windows DPAPI encryption keeps API keys secure (no plain text in config files)
 - **🚀High Performance** - Retry logic with exponential backoff, rate limiting compliance
 - **🛡️ Production Ready** - Enhanced error handling, structured logging with request IDs, comprehensive security guidelines
@@ -185,7 +216,7 @@ excluded via `addopts` in `pyproject.toml` and additionally gated by
 - *"Find all petitions filed by TechCorp and tell me about any red flags"*
 - *"Show me revival petitions for art unit 2128 - I'm analyzing abandonment patterns"*
 - *"Get me the petition history for application 17414168"*
-- *"Research this company's petition track record and correlate with their PTAB challenges"* - * Requires that the USPTO Patent Trial and Appeal Board (PTAB) be installed - [uspto_ptab_mcp](https://github.com/john-walkoe/uspto_ptab_mcp.git) and also recommended to ask LLM to perform a fpd_get_guidance tool call prior to this or any cross MCP prompt (see quick reference chart for section selection, additional details in [Usage Examples](USAGE_EXAMPLES.md))
+- *"Research this company's petition track record and correlate with their PTAB challenges"* - * Requires that the USPTO Patent Trial and Appeal Board (PTAB) be installed - [uspto_ptab_mcp](https://github.com/john-walkoe/uspto_ptab_mcp.git) and also recommended to ask LLM to perform a FPD_get_guidance tool call prior to this or any cross MCP prompt (see quick reference chart for section selection, additional details in [Usage Examples](USAGE_EXAMPLES.md))
 - *"Analyze this art unit's prosecution quality by looking at petition frequency and types"*
 
 **LLM Performs these steps:**
@@ -196,14 +227,14 @@ The field configuration supports an optimized research progression:
 
 1. **Discovery (Minimal)** returns 50-100 petitions efficiently without document bloat
 2. **Selection and Analysis (Balanced - Optional)** from the retrieved select likely petition(s). Optional balanced search(es) performed if needed in advanced workflows and/or cross-MCP workflows with Patent File Wrapper or PTAB
-3. **Detailed Petition Review** via `fpd_get_petition_details` for selected petitions with complete structured data for LLM's use in analysis
+3. **Detailed Petition Review** via `FPD_Get_petition_details` for selected petitions with complete structured data for LLM's use in analysis
 4. **Select specific petition documents for examination** (Optional) e.g. Decision letters, petition filings, supporting evidence
-5. **Retrieve document_id(s) from documentBag** (Optional) use `fpd_get_petition_details` with `include_documents=True` to get the document_id(s)
-6. **Document Extraction for LLM use and/or Download Links** (Optional) Document extraction via intelligent hybrid tool that auto-optimizes for cost and quality, and Downloads of the documents as PDFs uses URLs from an HTTP proxy that obscures the USPTO's API key from chat history
+5. **Retrieve document_id(s) from documentBag** (Optional) use `FPD_Get_petition_details` with `include_documents=True` to get the document_id(s)
+6. **Document Extraction for LLM use and/or Download Links** (Optional) Document extraction via intelligent hybrid tool that auto-optimizes for speed and quality, and Downloads of the documents as PDFs uses URLs from an HTTP proxy that obscures the USPTO's API key from chat history
 
 ##  🎯 Prompt Templates
 
-This MCP server includes sophisticated AI-optimized prompt templates for complex petition workflows. For detailed documentation on all templates, features, and usage examples, see **[PROMPTS.md](PROMPTS.md)**.
+This MCP server includes sophisticated AI-optimized prompt templates for complex petition workflows. Prompt templates are opt-in server-side: they register only when the server is started with `FPD_ENABLE_PROMPTS=true` (default off - no prompts are advertised). For detailed documentation on all templates, features, and usage examples, see **[PROMPTS.md](PROMPTS.md)**.
 
 ### Quick Template Overview
 
@@ -226,17 +257,17 @@ This MCP server includes sophisticated AI-optimized prompt templates for complex
 
 | Registered Tool Name | Context Reduction | Use Case |
 |----------|------------------|----------|
-| `Search_petitions_minimal` | typical 95-99% | Ultra-fast petition discovery (user-customizable minimal fields) |
-| `Search_petitions_balanced` | typical 80-88% | Key fields for detailed analysis (no documentBag) |
-| `Search_petitions_by_art_unit` | typical 80-88% | Art unit quality assessment with date range filtering |
-| `Search_petitions_by_application` | typical 80-88% | Complete petition history for specific application |
+| `FPD_Search_petitions_minimal` | typical 95-99% | Ultra-fast petition discovery (user-customizable minimal fields) |
+| `FPD_Search_petitions_balanced` | typical 80-88% | Key fields for detailed analysis (no documentBag) |
+| `FPD_Search_petitions_by_art_unit` | typical 80-88% | Art unit quality assessment with date range filtering |
+| `FPD_Search_petitions_by_application` | typical 80-88% | Complete petition history for specific application |
 
 ##  Search Strategies
 
 ### Specialized Search Strategies
 
-- **Art Unit Quality Assessment** - Use `fpd_search_petitions_by_art_unit` to analyze petition patterns across art units for examiner behavior and technology difficulty assessment
-- **Application Petition History** - Use `fpd_search_petitions_by_application` to get complete petition timeline for specific applications during prosecution
+- **Art Unit Quality Assessment** - Use `FPD_Search_petitions_by_art_unit` to analyze petition patterns across art units for examiner behavior and technology difficulty assessment
+- **Application Petition History** - Use `FPD_Search_petitions_by_application` to get complete petition timeline for specific applications during prosecution
 - **Cross-MCP Integration** - Link petition data with PFW prosecution history using `applicationNumberText` and PTAB challenges using `patentNumber`
 - **Red Flag Identification** - Focus on revival petitions (37 CFR 1.137), examiner disputes (37 CFR 1.181), and denied decisions for prosecution quality analysis
 
@@ -244,22 +275,22 @@ This MCP server includes sophisticated AI-optimized prompt templates for complex
 
 ```python
 # Art unit quality assessment
-fpd_search_petitions_by_art_unit(
+FPD_Search_petitions_by_art_unit(
     art_unit="2128",
     date_range="2020-01-01:2024-12-31",
     limit=100
 )
 
 # Complete application petition history
-fpd_search_petitions_by_application(
-    application_number="17896175",
+FPD_Search_petitions_by_application(
+    application_number="17414168",
     include_documents=False
 )
 
 # Cross-MCP workflow example
 # 1. Find applications with PFW
 # 2. Check petition history for red flags
-fpd_search_petitions_by_application(
+FPD_Search_petitions_by_application(
     application_number=app_from_pfw,
     include_documents=True
 )
@@ -269,26 +300,25 @@ fpd_search_petitions_by_application(
 
 | Registered Tool Name | Purpose | Requirements |
 |----------|----------|----------|
-| `Get_petition_details` | Full petition details by UUID with optional documentBag | USPTO_API_KEY |
-| `FPD_get_document_content_with_mistral_ocr` | Intelligent document extraction with cost transparency | USPTO_API_KEY (+ MISTRAL_API_KEY for OCR fallback) |
+| `FPD_Get_petition_details` | Full petition details by UUID with optional documentBag | USPTO_API_KEY |
+| `FPD_get_document_content_with_ocr` | Intelligent hybrid document extraction | USPTO_API_KEY (+ `MISTRAL_API_KEY` or `DOCLING_SERVE_URL` to OCR scanned pages) |
 | `FPD_get_document_download` | Secure browser-accessible download URLs | USPTO_API_KEY |
 
 ### Document Processing Capabilities
 
-- **Petition Details Tier (`fpd_get_petition_details`)**: Complete petition data retrieval
+- **Petition Details Tier (`FPD_Get_petition_details`)**: Complete petition data retrieval
   - **UUID-based lookup** - Find petition by unique identifier
   - **Optional document bag** - Include/exclude documents based on need
   - **LLM-optimized parsing** - Extracts issues, rules cited, statutes, decision details
   - **Cross-reference fields** - applicationNumberText, patentNumber, groupArtUnitNumber for cross-MCP workflows
-- **Intelligent Extraction Tier (`fpd_get_document_content`)**: Hybrid auto-optimized extraction
-  - **Smart method selection** - Automatically tries PyPDF2 first (free), falls back to Mistral OCR (API key needed) when needed
-  - **Cost optimization** - Only pay for OCR when PyPDF2 extraction fails quality check
-  - **Quality detection** - Automatically determines if extraction is usable or requires OCR
-  - **Transparent reporting** - Shows which method was used and associated costs
+- **Intelligent Extraction Tier (`FPD_get_document_content_with_ocr`)**: Hybrid auto-optimized extraction
+  - **Capability-ordered tiers** - Reads the PDF's native text layer with `pypdf` first; falls back to OCR only for pages that have no usable text layer
+  - **Quality detection** - Automatically determines whether the native text layer is usable or the page needs OCR
+  - **Two OCR backends** - Mistral OCR (`MISTRAL_API_KEY`, optional) or a self-hosted Docling backend such as `docling-serve` (`DOCLING_SERVE_URL`); either is sufficient, neither is required for text-layer PDFs
+  - **Transparent reporting** - `extraction_method` names the tier that produced the text (`pypdf`, `Mistral OCR (...)`, or `Docling (docling-serve)`)
   - **Unified interface** - Single tool handles all document types (eliminates tool confusion)
-  - **Advanced capabilities** - Extracts text from scanned documents using Mistral OCR
-  - **Cost** - Free for text-based PDFs, ~$0.001/page for scanned OCR using Mistral
-- **Browser Download Tier (`fpd_get_document_download`)**: Secure proxy downloads with enhanced filenames
+  - **Speed** - Instant for text-layer PDFs; OCR of scanned documents is slower per page
+- **Browser Download Tier (`FPD_get_document_download`)**: Secure proxy downloads with enhanced filenames
   - **Click-to-download** URLs that work directly in any browser
   - **Centralized proxy integration** - If set up, auto-detects PFW MCP and uses unified proxy (port 8080) for all USPTO documents downloads, will fall back to local proxy if issues detected with centralized proxy.
     - **Persistent links** - 7-day encrypted links when using PFW centralized proxy (work across MCP restarts)
@@ -317,7 +347,7 @@ fpd_search_petitions_by_application(
 
   **`FPD_get_guidance` Tool** - Solves MCP Resources visibility problem with selective guidance sections:
 
-**🎯 Quick Refrence Chart** - What section for your question?
+**🎯 Quick Reference Chart** - What section for your question?
 
 ​	🔍 "Find petitions by company/art unit" → tools
 
@@ -337,7 +367,11 @@ fpd_search_petitions_by_application(
 
 ​	🎯 "Ultra-minimal PFW + FPD workflows" → ultra_context
 
-​	💰 "Reduce extraction costs" → cost
+​	"Choose an extraction approach" → extraction
+
+​	📏 "Why was my response truncated / how do I page it?" → limits
+
+​	🗓️ "Why did an old petition return zero results?" → coverage
 
 The tool provides specific workflows, field recommendations, API call optimization strategies, anti-patterns to avoid, and cross-MCP integration patterns for maximum efficiency. See [USAGE_EXAMPLES.md](USAGE_EXAMPLES.md) for detailed examples and integration workflows.
 
@@ -350,8 +384,8 @@ For comprehensive usage examples, including:
 - **Application petition history** (complete lifecycle tracking)
 - **Cross-MCP integration workflows** (FPD + PFW + PTAB + Pinecone)
 - **Red flag identification** (revival petitions, examiner disputes, denied petitions)
-- **Document extraction and downloads** (hybrid PyPDF2/OCR approach)
-- **Cost optimization strategies**
+- **Document extraction and downloads** (hybrid `pypdf` text-layer / OCR approach)
+- **Extraction strategy guidance**
 
 See the detailed [USAGE_EXAMPLES.md](USAGE_EXAMPLES.md) documentation.
 
@@ -387,7 +421,7 @@ The **Final Petition Decisions (FPD) MCP** bridges prosecution and post-grant ch
 - **FPD + PTAB**: Correlate petition red flags with post-grant challenge outcomes
 - **PFW + FPD + PTAB**: Complete patent lifecycle tracking from filing through post-grant challenges
 - **PFW + FPD + Enhanced Citations**: Art unit quality assessment with citation intelligence and petition pattern analysis
-- **FPD + Pinecone (Assistant or RAG)**: Research MPEP guidance and petition standards before extracting expensive documents
+- **FPD + Pinecone (Assistant or RAG)**: Research MPEP guidance and petition standards before pulling full document text
 
 ### Key Integration Patterns
 
@@ -498,7 +532,7 @@ uspto_fpd_mcp/
 │   └── check_prompt_injections.py # Standalone scanning script (pre-commit hook)
 ├── src/
 │   └── fpd_mcp/
-│       ├── main.py                 # Composition root: FastMCP server, 9 tools, OAuth wiring
+│       ├── main.py                 # Composition root: FastMCP server, 9 tools (8 registered by default; FPD_manage_users needs FPD_ENABLE_USER_MANAGEMENT), OAuth wiring
 │       ├── __main__.py            # Entry point for -m execution
 │       ├── runtime.py             # Settings/logging bootstrap + service singletons
 │       ├── server_bootstrap.py    # Transport startup + proxy lifecycle
@@ -516,10 +550,9 @@ uspto_fpd_mcp/
 │       │   ├── tool_reflections.py # Sectioned LLM guidance (80-95% token reduction)
 │       │   ├── log_config.py      # Logging setup (sanitizing filter on every handler)
 │       │   ├── api_constants.py   # API configuration constants
-│       │   ├── api_key_validation.py
 │       │   ├── feature_flags.py
 │       │   └── storage_paths.py    # Storage path management
-│       ├── prompts/               # 10 registered prompt templates
+│       ├── prompts/               # 10 prompt templates (opt-in via FPD_ENABLE_PROMPTS)
 │       ├── api/
 │       │   ├── fpd_client.py      # FPD API client (retries, circuit breakers, cache)
 │       │   ├── docling_client.py  # Self-hosted Docling OCR client
@@ -699,7 +732,7 @@ rewritten, because verbatim fidelity of legal text is the product. The
 defense against prompt-injection-shaped content inside retrieved documents
 is labeling and detection, not mutation:
 
-- Every successful `FPD_get_document_content_with_mistral_ocr` response
+- Every successful `FPD_get_document_content_with_ocr` response
   carries a `provenance_note` stating that extracted/OCR text is quoted
   data from USPTO petition documents, never instructions to the consuming
   model, and that petitioner- or office-drafted characterizations should be

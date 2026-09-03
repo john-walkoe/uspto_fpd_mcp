@@ -40,9 +40,17 @@ class FieldManager:
             logger.debug(f"Available field sets: {list(self.get_predefined_sets().keys())}")
 
         except (FileNotFoundError, yaml.YAMLError, Exception) as e:
-            logger.error(f"Failed to load field configuration: {e}. Using defaults.")
+            # D-3: _get_default_config() is a SECOND definition of the field
+            # sets. It is kept so a missing YAML degrades rather than killing
+            # the server, but the fallback is a real divergence risk — the
+            # customization surface documented in CUSTOMIZATION.md is the YAML
+            # — so it is announced loudly instead of at INFO.
+            logger.error(
+                f"Failed to load field configuration from {self.config_path}: {e}. "
+                "Falling back to the in-code default field sets; edits to "
+                "field_configs.yaml are NOT in effect."
+            )
             self.config_data = self._get_default_config()
-            logger.info("Using default field configuration")
 
     def _get_default_config(self) -> Dict[str, Any]:
         """Provide default field configuration when config file fails to load"""
@@ -160,12 +168,23 @@ class FieldManager:
             original_data_sample = data[results_key][0] if data[results_key] else {}
             filtered_data_sample = filtered_results[0] if filtered_results else {}
 
-            # Add context info
+            # Add context info.
+            #
+            # original_field_count and filtered_field_count are both counts of
+            # fields PRESENT on the same sampled record, so they are
+            # comparable and filtered can never exceed original. Until
+            # 2026-08-30 filtered_field_count was len(fields) — the size of the
+            # CONFIGURED set — which on a sparse record produced the nonsense
+            # "filtered 7 fields down to 8" (the API omits null fields rather
+            # than returning them, so a record routinely carries fewer fields
+            # than were requested). The configured size is still reported, as
+            # its own key, because it is what an operator tunes.
             filtered_data["context_info"] = {
                 "fields_used": fields,
                 "field_set": field_set,
                 "original_field_count": len(original_data_sample.keys()) if original_data_sample else 0,
-                "filtered_field_count": len(fields),
+                "filtered_field_count": len(filtered_data_sample.keys()) if filtered_data_sample else 0,
+                "configured_field_count": len(fields),
                 "context_reduction": self._calculate_reduction(original_data_sample, filtered_data_sample)
             }
 
@@ -200,7 +219,12 @@ class FieldManager:
             if original_chars == 0:
                 return "0%"
 
-            # Calculate actual context reduction
+            # Calculate actual context reduction. Never report a reduction
+            # when the filtered payload is no smaller than the original: a
+            # projection that dropped nothing saved nothing, and a negative
+            # percentage would be a claim about data this function never saw.
+            if filtered_chars >= original_chars:
+                return "0%"
             reduction = ((original_chars - filtered_chars) / original_chars) * 100
             return f"{reduction:.0f}%"
         except Exception as e:

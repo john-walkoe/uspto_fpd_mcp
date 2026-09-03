@@ -1,5 +1,7 @@
 """Art Unit Quality Assessment - Evaluate prosecution quality via petition patterns"""
 
+from ._flags import flag
+
 
 async def art_unit_quality_assessment_prompt(
     art_unit: str,
@@ -20,6 +22,10 @@ async def art_unit_quality_assessment_prompt(
 
     Returns comprehensive art unit quality metrics including examiner patterns and prosecution efficiency indicators.
     """
+    # R-2: accept any encoding a caller sends (True, 'True', 'yes',
+    # '1'); the emitted template compares the normalized literal.
+    comparison_analysis = flag(comparison_analysis)
+
     return f"""Art Unit Quality Assessment - Prosecution Pattern Analysis
 
 Inputs Provided:
@@ -47,10 +53,10 @@ print(f"**Analyzing Art Unit:** {art_unit}")
 print(f"**Date Range:** {{date_range_filter}}\\n")
 
 # Search for all petitions in this art unit
-petitions = fpd_search_petitions_by_art_unit(
+petitions = FPD_Search_petitions_by_art_unit(
     art_unit="{art_unit}",
     date_range=date_range_filter,
-    limit=200  # Comprehensive analysis
+    limit=100  # ceiling; page with offset= for more
 )
 
 total_petitions = len(petitions.get('results', []))
@@ -72,7 +78,7 @@ for petition in petitions.get('results', []):
 
     try:
         # Get detailed petition info for categorization
-        details = fpd_get_petition_details(petition_id=petition_id, include_documents=False)
+        details = FPD_Get_petition_details(petition_id=petition_id, include_documents=False)
         rules = details.get('ruleBag', [])
 
         # Categorize by CFR rule
@@ -113,7 +119,7 @@ examiner_list = []
 if "{comparison_analysis}" == "true":
     try:
         # Get sample of applications from this art unit via PFW
-        pfw_apps = pfw_search_applications_minimal(
+        pfw_apps = PFW_search_applications_minimal(
             art_unit="{art_unit}",
             fields=['applicationNumberText', 'applicationMetaData.examinerNameText'],
             limit=200
@@ -232,7 +238,7 @@ try:
                       if p.get('patentNumber')]
     ptab_challenges = 0
     for patent_num in granted_patents[:20]:  # Sample check
-        challenges = search_trials_minimal(patent_number=patent_num)
+        challenges = PTAB_search_trials_minimal(patent_number=patent_num)
         if challenges and len(challenges.get('results', [])) > 0:
             ptab_challenges += 1
 

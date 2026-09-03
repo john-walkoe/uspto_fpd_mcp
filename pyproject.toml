@@ -9,16 +9,19 @@ authors = [
 ]
 
 dependencies = [
-    "fastmcp[apps]>=3.4",
+    "fastmcp[apps]>=4.0.0,<5.0.0",
     "aiosqlite>=0.20",
-    "starlette>=0.40.0",
+    # Floors raised with the FastMCP 4 bump: fastmcp 4 requires starlette >=1.0.1
+    # and fastapi >=0.133, so the old 0.x floors described a combination this
+    # package can no longer be installed with.
+    "starlette>=1.0.1",
     "httpx>=0.28.1",
     "pydantic>=2.10.6",
     "pydantic-settings>=2.7.1",
     "pyyaml>=6.0.2",
     "python-dotenv>=1.0.1",
     "click>=8.2.1",
-    "fastapi>=0.115.0",
+    "fastapi>=0.133",
     "uvicorn[standard]>=0.32.0",
     "cryptography>=42.0.0",
     "requests>=2.31.0",
@@ -55,7 +58,12 @@ testpaths = ["tests"]
 # test_unified_key_management.py / test_unified_storage.py overwrite the REAL
 # DPAPI-stored keys; they are also gated by FPD_RUN_KEY_TESTS inside each
 # module (defense in depth).
-addopts = "--ignore=tests/test_unified_key_management.py --ignore=tests/test_unified_storage.py"
+# T-7: `live` tests hit api.uspto.gov. They were gated only on USPTO_API_KEY
+# being set, which is the normal state on a developer machine, so a plain
+# `pytest` run made three network calls inside an otherwise hermetic suite.
+# Run them deliberately: `uv run pytest -m live`.
+markers = ["live: hits the real USPTO API; requires USPTO_API_KEY"]
+addopts = "--ignore=tests/test_unified_key_management.py --ignore=tests/test_unified_storage.py -m 'not live'"
 
 [tool.ruff]
 line-length = 100

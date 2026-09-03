@@ -26,17 +26,32 @@ Available Prompts:
 - examiner_dispute_citation_analysis: Examiner dispute correlation with citation patterns
 """
 
+import os
+
+# Registration gate (FPD_ENABLE_USER_MANAGEMENT parity): the 10 prompt
+# templates are registered only when FPD_ENABLE_PROMPTS=true. Default off —
+# unset/false means NO prompts appear in prompts/list, on stdio and HTTP
+# alike. Evaluated at import time, same as the admin-tool gate.
+PROMPTS_ENABLED = (
+    os.getenv("FPD_ENABLE_PROMPTS", "false").lower() == "true"
+)
+
+
 def register_prompts(mcp_server):
-    """Register all prompts with the MCP server.
+    """Register all prompts with the MCP server (gated by FPD_ENABLE_PROMPTS).
 
     This function is called from main.py after the mcp object is created.
-    It imports each prompt module and calls its own register(mcp) function,
-    passing the server instance explicitly (no order-dependent global
-    injection into the prompts package namespace).
+    When the gate is off (default) it returns without registering anything;
+    when on, it imports each prompt module and calls its own register(mcp)
+    function, passing the server instance explicitly (no order-dependent
+    global injection into the prompts package namespace).
 
     Args:
         mcp_server: The FastMCP server instance to register prompts with
     """
+    if not PROMPTS_ENABLED:
+        return
+
     from . import company_petition_risk_assessment_pfw
     from . import art_unit_quality_assessment
     from . import revival_petition_analysis
@@ -61,4 +76,5 @@ def register_prompts(mcp_server):
 
 __all__ = [
     'register_prompts',
+    'PROMPTS_ENABLED',
 ]

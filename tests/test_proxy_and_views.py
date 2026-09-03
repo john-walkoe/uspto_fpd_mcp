@@ -187,3 +187,99 @@ class TestViews:
         # Lesson 26: the Google Patents button must be gated on a US patent
         # number shape
         assert "(RE)?\\d{6,8}" in SEARCH_RESULTS_HTML
+
+
+# ------------------------------------------ M-12 / L-10 / L-11: view hardening
+
+
+class TestViewEscaping:
+    """USPTO applicant names and invention titles reach innerHTML (M-12)."""
+
+    @pytest.mark.parametrize(
+        "html",
+        [SEARCH_RESULTS_HTML, DOWNLOADS_HTML, _DOWNLOADS_PAGE_HTML],
+        ids=["search", "downloads-app", "downloads-page"],
+    )
+    def test_every_view_defines_the_escape_helper(self, html):
+        assert "function esc(s)" in html
+        assert "'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'" in html
+
+    @pytest.mark.parametrize(
+        "field",
+        ["p.applicant", "p.title", "p.decision", "p.petType", "p.office",
+         "p.rules", "p.id", "p.appNum", "p.patentNum", "p.artUnit", "p.tc"],
+    )
+    def test_search_card_escapes_applicant_authored_fields(self, field):
+        assert f"esc({field})" in SEARCH_RESULTS_HTML
+        assert "${" + field + "}" not in SEARCH_RESULTS_HTML
+
+    def test_search_card_escapes_title_attributes(self):
+        # An unescaped quote in title="..." closes the attribute.
+        for field in ("p.applicant", "p.title", "p.petType", "p.office", "p.rules"):
+            assert f'title="${{esc({field})}}"' in SEARCH_RESULTS_HTML
+
+    def test_filter_pill_escapes_its_label(self):
+        assert "esc(label)" in SEARCH_RESULTS_HTML
+
+    @pytest.mark.parametrize("field", ["doc.title", "doc.petition_id", "doc.proxy_url"])
+    def test_downloads_app_escapes_document_fields(self, field):
+        assert f"esc({field})" in DOWNLOADS_HTML
+        assert "${" + field + "}" not in DOWNLOADS_HTML
+
+    def test_proxy_downloads_page_escapes_the_registry(self):
+        assert "esc(d.download_url)" in _DOWNLOADS_PAGE_HTML
+        assert "${d.download_url}" not in _DOWNLOADS_PAGE_HTML
+
+
+class TestDownloadsPageCSP:
+    """L-11: the page could not run under its own default-src 'self'."""
+
+    def test_policy_hashes_the_pages_inline_script(self):
+        from fpd_mcp.proxy.server import _CONTENT_SECURITY_POLICY
+
+        assert "script-src 'self' 'sha256-" in _CONTENT_SECURITY_POLICY
+        # CSP is tightened, not dropped.
+        assert "default-src 'self'" in _CONTENT_SECURITY_POLICY
+        assert "object-src 'none'" in _CONTENT_SECURITY_POLICY
+        assert "frame-ancestors 'none'" in _CONTENT_SECURITY_POLICY
+        assert "script-src 'self' 'unsafe-inline'" not in _CONTENT_SECURITY_POLICY
+
+    def test_hash_matches_the_script_actually_served(self):
+        import base64
+        import hashlib
+
+        body = re.findall(
+            r"<script[^>]*>(.*?)</script>", _DOWNLOADS_PAGE_HTML, re.DOTALL
+        )
+        assert len(body) == 1
+        expected = base64.b64encode(
+            hashlib.sha256(body[0].encode("utf-8")).digest()
+        ).decode("ascii")
+
+        from fpd_mcp.proxy.server import _CONTENT_SECURITY_POLICY
+
+        assert f"'sha256-{expected}'" in _CONTENT_SECURITY_POLICY
+
+
+class TestRecentDownloadUrlScheme:
+    """L-10: the value is rendered as an anchor href."""
+
+    def test_non_http_schemes_are_rejected(self):
+        from pydantic import ValidationError
+
+        from fpd_mcp.proxy.models import RecentDownloadRegistration
+
+        base = dict(petition_id="p1", document_identifier="d1")
+        for bad in ("javascript:alert(1)", "data:text/html,<script>x</script>",
+                    "file:///etc/passwd", "/relative"):
+            with pytest.raises(ValidationError):
+                RecentDownloadRegistration(download_url=bad, **base)
+
+    def test_http_and_https_are_accepted(self):
+        from fpd_mcp.proxy.models import RecentDownloadRegistration
+
+        base = dict(petition_id="p1", document_identifier="d1")
+        for good in ("https://api.uspto.gov/x.pdf",
+                     "http://127.0.0.1:8081/download/persistent/abc"):
+            model = RecentDownloadRegistration(download_url=good, **base)
+            assert model.download_url == good

@@ -411,6 +411,29 @@ def ensure_internal_auth_secret() -> str:
     return UnifiedSecureStorage().ensure_internal_auth_secret()
 
 
+def split_secret_candidates(secret: Optional[str]) -> list:
+    """Split a resolved INTERNAL_AUTH_SECRET into ordered rotation candidates.
+
+    The env var (and, since the rotation script writes it this way, the
+    secure-store value too) may hold a comma-separated list: the CURRENT
+    secret first, then any secret still being retired. Returns an
+    order-preserving, deduplicated list of non-empty, stripped candidates —
+    `[]` if `secret` is falsy. A single value with no comma round-trips as a
+    one-element list, so every existing caller of `get_internal_auth_secret`
+    keeps working unchanged.
+    """
+    if not secret:
+        return []
+    seen = set()
+    candidates = []
+    for part in secret.split(","):
+        part = part.strip()
+        if part and part not in seen:
+            seen.add(part)
+            candidates.append(part)
+    return candidates
+
+
 def has_secure_key(key_name: str) -> bool:
     """
     Check if a secure key exists (for backward compatibility).

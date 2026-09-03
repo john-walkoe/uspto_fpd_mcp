@@ -126,8 +126,8 @@ servers **on the same host** (the store enables WAL + busy_timeout). One
 `mcp_users` row then grants access to every server mounting that file. Do not
 share the file across hosts or network filesystems.
 
-(In the USPTO suite deployment FPD points this at the shared paid-tier file
-hosted by PFW.)
+(In a multi-server USPTO suite deployment, FPD points this at the shared
+user database hosted alongside the PFW server.)
 
 ## 6. Verify
 
