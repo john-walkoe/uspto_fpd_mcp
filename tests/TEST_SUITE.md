@@ -95,9 +95,10 @@ FPD_Get_petition_details
 {"petition_id": "e55bd36d-961f-511e-b72c-b4b1529d67ef", "include_documents": true}
 ```
 **Expect:** petition record with `documentBag` containing doc
-`HY1J6ICXPXXIFW4`. ⚠️ Currently blocked by the upstream
-`includeDocuments=true` 500 — with `include_documents: false` the petition
-record returns fine.
+`HY1J6ICXPXXIFW4`. The upstream `includeDocuments=true` 500 is still live
+(re-verified 2026-09-03), so also expect `document_metadata_source:
+"application_file_wrapper_fallback"` and `document_metadata_available: true`;
+with `include_documents: false` the petition record returns without documents.
 
 ### T6 FPD_get_document_download — persistent link ⭐
 ```
@@ -110,8 +111,8 @@ PFW proxy's `/document/persistent/{hash}` (centralized mode);
 `enhanced_filename` like `PET-YYYY-MM-DD_APP-13408005_...pdf`;
 `download_id` set; `expires_in_days: 7`. Click the link in a browser:
 ERR_ABORTED + the PDF lands in Downloads (no 401 — the hash is the
-credential). ⚠️ Blocked by the same upstream outage until USPTO fixes
-`includeDocuments`.
+credential). Passes through the file-wrapper fallback while the upstream
+`includeDocuments` outage lasts (verified on prod 2026-09-03).
 
 ### T7 FPD_Search_petitions_by_art_unit
 ```
@@ -163,7 +164,8 @@ FPD_get_document_content_with_ocr
 text layer) or `Mistral OCR (...)`; **progress notifications** appear
 during download/OCR.
 Docling is the third tier for scanned docs ≤ 25 pages when
-`DOCLING_SERVE_URL` is set. ⚠️ Blocked by the upstream outage.
+`DOCLING_SERVE_URL` is set. Passes through the file-wrapper fallback while
+the upstream `includeDocuments` outage lasts.
 Also expect a `provenance_note` field (retrieved-text-is-data labeling,
 2026-07 provenance posture) on every successful response; an
 `injection_scan` annotation appears ONLY if the extracted text is
