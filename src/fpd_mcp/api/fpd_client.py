@@ -735,9 +735,17 @@ class FPDClient:
         without_docs["document_metadata_available"] = True
         without_docs["document_metadata_source"] = "application_file_wrapper_fallback"
         without_docs["document_metadata_note"] = (
-            "USPTO's petition-details includeDocuments=true endpoint is "
-            "currently erroring upstream; documentBag was reconstructed from "
-            "the application file wrapper (the same underlying documents)."
+            "THIS documentBag IS THE APPLICATION'S FILE WRAPPER, NOT A "
+            "PETITION BAG. USPTO's petition-details includeDocuments=true "
+            "endpoint answers HTTP 500 (still erroring when last observed on "
+            "2026-09-03), so the bag was reconstructed from the application "
+            "file wrapper instead. It lists the WHOLE prosecution history of "
+            "the application (office actions, claims, specification, IDS, "
+            "892/1449 forms, abandonment notices), not only the papers filed "
+            "with or issued on this petition, and it would be identical on "
+            "every petition of the same application. Filter it before "
+            "describing it as this petition's documents: the petition papers "
+            "are the PET/PETDEC/PPH.DECISION-style entries within it."
         )
         return without_docs
 
@@ -928,14 +936,16 @@ class FPDClient:
         result["document_metadata_available"] = True
         result["document_metadata_source"] = "application_file_wrapper"
         result["document_metadata_note"] = (
-            "The FPD search endpoint serves no documentBag of its own, and "
-            "USPTO's petition-details includeDocuments=true endpoint is "
-            "currently erroring upstream, so documentBag was taken from the "
-            "APPLICATION FILE WRAPPER — the same source "
-            "FPD_Get_petition_details serves today. It is the application's "
-            "whole prosecution history (office actions, claims, IDS, ...), "
-            "not only the petition papers, and it is identical on every "
-            "petition of this application."
+            "THIS documentBag IS THE APPLICATION'S FILE WRAPPER, NOT A "
+            "PETITION BAG. The FPD search endpoint serves no documentBag of "
+            "its own, and USPTO's petition-details includeDocuments=true "
+            "endpoint answers HTTP 500 (still erroring when last observed on "
+            "2026-09-03), so the bag was taken from the APPLICATION FILE "
+            "WRAPPER, the same source FPD_Get_petition_details serves today. "
+            "It is the application's whole prosecution history (office "
+            "actions, claims, IDS, ...), not only the petition papers, and it "
+            "is identical on every petition of this application. Filter it "
+            "before describing it as this petition's documents."
         )
         return result
 

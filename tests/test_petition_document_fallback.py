@@ -344,3 +344,49 @@ async def test_get_petition_details_surfaces_fallback_metadata(mock_runtime):
     assert _DOC_ID in doc_ids
     # Existing behavior (llm_guidance) untouched by the additive keys
     assert "llm_guidance" in result
+
+
+# ---------------------------------------------------------------------------
+# The fallback bag says what it is (QA ledger 2026-09-03)
+# ---------------------------------------------------------------------------
+# The fallback is correct and stays, but document_metadata_source alone is a
+# label a reader has to know how to decode. The note now says in words that the
+# bag is the application's file wrapper rather than a petition bag, and carries
+# the date the upstream HTTP 500 was last observed.
+
+async def test_fallback_note_says_the_bag_is_the_application_file_wrapper(monkeypatch):
+    client = _client()
+
+    async def fake_make_request(endpoint, method="GET", base_url=None, **kwargs):
+        if base_url == client.applications_base_url:
+            return _wrapper_result()
+        if (kwargs.get("params") or {}).get("includeDocuments") == "true":
+            return dict(_UPSTREAM_500)
+        return _without_docs_result()
+
+    monkeypatch.setattr(client, "_make_request", fake_make_request)
+
+    result = await client.get_petition_by_id(_PETITION_ID, include_documents=True)
+
+    note = result["document_metadata_note"]
+    assert "APPLICATION'S FILE WRAPPER, NOT A PETITION BAG" in note
+    assert "WHOLE prosecution history" in note
+    assert "2026-09-03" in note
+
+
+async def test_search_wrapper_note_says_the_bag_is_the_application_file_wrapper():
+    client = _client()
+    result = {
+        "petitionDecisionDataBag": [{"petitionDecisionRecordIdentifier": _PETITION_ID}],
+    }
+
+    async def fake_get_application_documents(application_number):
+        return _wrapper_result()
+
+    client.get_application_documents = fake_get_application_documents
+
+    merged = await client._attach_documents_to_search_hits(result, _APP_NUMBER)
+
+    note = merged["document_metadata_note"]
+    assert "APPLICATION'S FILE WRAPPER, NOT A PETITION BAG" in note
+    assert "2026-09-03" in note

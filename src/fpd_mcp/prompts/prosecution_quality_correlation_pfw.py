@@ -1,5 +1,6 @@
 """Prosecution Quality Correlation - Correlate examiner patterns with petition frequency"""
 
+from ._classification import DECISION_NOTE
 from ._flags import flag
 
 
@@ -31,6 +32,8 @@ async def prosecution_quality_correlation_prompt(
     statistical_analysis = flag(statistical_analysis)
 
     return f"""Prosecution Quality Correlation Analysis - Examiner Performance Assessment
+
+{DECISION_NOTE}
 
 Inputs Provided:
 - Art Unit: "{art_unit}"
@@ -216,12 +219,22 @@ print(f"**Total Applications:** {{total_apps}}\\n")
 
 # Correlation Metrics Table
 print("### CORRELATION METRICS\\n")
-print("| Metric | Value | Benchmark | Assessment |")
-print("|--------|-------|-----------|------------|")
-print(f"| Petition Rate | {{petition_rate:.1f}}% | <5% (good) | {{'✅ Good' if petition_rate < 5 else '⚠️ High' if petition_rate < 10 else '🚨 Very High'}} |")
-print(f"| Examiner Disputes | {{petition_correlation['petition_types']['examiner_dispute']}} | <20% | {{'✅ Good' if examiner_dispute_rate < 20 else '⚠️ Elevated' if examiner_dispute_rate < 40 else '🚨 High'}} |")
-print(f"| Revival Petitions | {{petition_correlation['petition_types']['revival']}} | <2% | {{'✅ Good' if petition_correlation['petition_types']['revival']/total_apps*100 < 2 else '⚠️ High'}} |")
-print(f"| Denied Petitions | {{petition_correlation['decisions']['denied']}} | <30% | {{'✅ Good' if denial_rate < 30 else '🚨 High'}} |")
+print("| Metric | Value | Baseline | Assessment |")
+print("|--------|-------|----------|------------|")
+print(f"| Petition Rate | {{petition_rate:.1f}}% | compute it, see below | pending a baseline |")
+print(f"| Examiner Disputes | {{petition_correlation['petition_types']['examiner_dispute']}} ({{examiner_dispute_rate:.1f}}% of petitions) | compute it, see below | pending a baseline |")
+print(f"| Revival Petitions | {{petition_correlation['petition_types']['revival']}} | compute it, see below | pending a baseline |")
+print(f"| Denied Petitions | {{petition_correlation['decisions']['denied']}} ({{denial_rate:.1f}}%) | none applies | not a quality metric |")
+
+print("\\n**No fixed bands.** This table used to print benchmark percentages")
+print("for each row that were never measured against this corpus, including")
+print("one for the denial rate. Observed art unit petition rates run far")
+print("below one percent, so those bands mark everything 'good' and teach a")
+print("reader to expect numbers two orders of magnitude off. Run the same")
+print("calculation over two or three comparable art units in the same")
+print("technology center and date window, report against that, and say so; or")
+print("report the raw counts and state that no baseline was established.")
+print("The denial rate is not a quality metric: see the reading rule above.\\n")
 
 # High Petition Applications
 if petition_correlation['high_petition_apps']:
@@ -259,7 +272,9 @@ else:
 - Petition analysis limited to first 50 applications to prevent context explosion
 - Requires both PFW and FPD MCPs - statistical analysis requires dual data sources
 - Use date_range filters to focus analysis on relevant time periods
-- Statistical significance requires minimum 20-30 applications for meaningful correlation
+- Small samples: report the application count behind every rate. No sample size
+  here was chosen by a power calculation, so do not describe any result as
+  statistically significant
 - Results are correlative, not causative - requires attorney judgment for interpretation
 
 ## PHASE 1: Analysis Scope Definition
@@ -284,7 +299,8 @@ Date Range Settings:
 - 5_years: 2019-01-01 to 2024-12-31
 
 Step 2: Validate analysis feasibility:
-- Minimum sample size requirements (>20 applications for statistical significance)
+- Sample size: record how many applications each rate is computed over and
+  report it alongside the rate; there is no minimum that makes a result a test
 - Data availability in both PFW and FPD systems
 - Time range coverage and data completeness
 
@@ -349,7 +365,9 @@ Petition Pattern Classification:
 - Red flag petitions: Denied petitions or examiner disputes
 
 Correlation-Relevant Red Flags:
-- DENIED_PETITION: Director denied the petition
+- PETITION_ON_THE_RECORD: the rule cited (37 CFR 1.137 revival, 1.181 dispute)
+  is the correlation-relevant fact. The decision value is not: DENIED is the
+  ordinary outcome and does not distinguish one examiner from another
 - REVIVAL_PETITION: 37 CFR 1.137 (abandonment)
 - EXAMINER_DISPUTE: 37 CFR 1.181 (supervisory review)
 
@@ -361,11 +379,13 @@ Step 5: Calculate correlation coefficients:
 - Timeline-Petition Correlation: Correlation between prosecution length and petition occurrence
 - Office Action-Petition Correlation: Correlation between OA count and petition frequency
 
-Statistical Significance Testing:
-- Sample size validation
-- Confidence interval calculation
-- P-value determination
-- Correlation strength interpretation
+Reporting the comparison honestly (no test is performed here):
+- Record the sample size behind every rate and print it next to the rate
+- Report the observed difference in percentage points, not as a verdict
+- State explicitly that no significance test was applied, because none is
+  available from these counts
+- Do not print a confidence interval, a p-value or a correlation strength that
+  this workflow did not compute
 
 Step 6: Benchmarking analysis:
 - Individual examiner vs art unit average
@@ -417,7 +437,8 @@ Monitoring Suggestions:
 ## EXPECTED DELIVERABLES
 
 Statistical Correlation Report:
-- Comprehensive correlation coefficients and significance testing
+- Observed differences with the denominators they were computed over, and an
+  explicit statement that no significance test was applied
 - Benchmarking analysis against peer groups
 - Pattern recognition insights and trend analysis
 - Predictive model for petition risk assessment

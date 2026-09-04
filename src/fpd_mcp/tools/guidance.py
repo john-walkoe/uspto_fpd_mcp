@@ -37,7 +37,7 @@ Available sections:
 - ultra_context: PFW fields parameter + ultra-minimal workflows
 - extraction: Extraction-tier selection for speed and quality
 - limits: Active response-size budgets, the _bounds/_window markers, paging
-- coverage: Dataset coverage bounds (2001+ filings; decisions data from 2022, backfilled monthly)
+- coverage: Dataset coverage bounds (2001+ filings; 2022 is a completeness floor for decisions, not a cutoff)
 
 Context Efficiency Benefits:
 - 80-95% token reduction (2-8KB per section vs 62KB total)

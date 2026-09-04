@@ -1,5 +1,6 @@
 """Complete Portfolio Due Diligence - Lifecycle risk assessment requiring PFW + PTAB MCPs"""
 
+from ._classification import DECISION_NOTE
 from ._flags import flag
 
 
@@ -27,6 +28,8 @@ async def complete_portfolio_due_diligence_prompt(
     risk_scoring = flag(risk_scoring)
 
     return f"""Complete Portfolio Due Diligence - Three-MCP Lifecycle Analysis
+
+{DECISION_NOTE}
 
 Inputs Provided:
 - Company Name: "{company_name}"
@@ -300,14 +303,16 @@ print("\\n### RECOMMENDED ACTIONS\\n")
 
 if total_risk_score > 12:
     print("**IMMEDIATE PRIORITY:**")
-    print("1. 🚨 Review all red-flag applications for prosecution quality issues")
+    print("1. Review flagged applications: read each petition's type and ruleBag")
+    print("   to see what was actually requested before drawing any conclusion")
     print("2. 🚨 Assess PTAB settlement strategies for challenged patents")
     print("3. 🚨 Investigate art unit/examiner patterns causing petition spikes")
     print("4. 🚨 Implement enhanced quality controls and deadline management\\n")
 elif total_risk_score > 5:
     print("**MODERATE PRIORITY:**")
     print("1. ⚠️ Monitor petition trends for degradation")
-    print("2. ⚠️ Review denied petitions for process improvements")
+    print("2. Group petitions by type before reading outcomes; a portfolio-wide")
+    print("   denial rate measures the mix of petition types, not the portfolio")
     print("3. ⚠️ Enhance prosecution training and quality standards\\n")
 else:
     print("**MAINTENANCE MODE:**")

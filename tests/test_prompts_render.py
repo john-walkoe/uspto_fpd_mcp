@@ -182,3 +182,60 @@ def test_flag_normalizes_every_encoding_a_caller_sends(value, expected):
 @pytest.mark.parametrize("value", [None, "", "banana"])
 def test_flag_respects_a_false_default(value):
     assert flag(value, default=False) == "false"
+
+
+# ---------------------------------------------------------------------------
+# Denial framing in the prompt surface (QA ledger 2026-09-03, B7 finding F1)
+# ---------------------------------------------------------------------------
+# The templates are gated off by default (FPD_ENABLE_PROMPTS) but they are
+# shipped code, and they carried the same denial-as-defect framing the tools'
+# llm_guidance did: DENIED read as weak arguments, denial rates read as
+# prosecution quality, and benchmark bands nobody had measured. The rule now
+# lives once in prompts/_classification.py and every template interpolates it.
+
+#: Phrases the templates must never emit again. Each was live in the rendered
+#: text before 2026-09-03; the list is the regression, not a style guide.
+_SUPERSEDED_PROMPT_PHRASES = (
+    "quality issues",
+    "weak arguments",
+    "weak prosecution",
+    "weakness",
+    "unsuccessful arguments",
+    "inadequate justification",
+    "failed petition attempts",
+    "potential weak patents",
+    "strongly correlate",
+    "<30%",
+    "<2% revival",
+    # Fabricated significance, same family as the fabricated benchmarks: the
+    # citation comparison graded a 15-point gap as significant on no test at
+    # all, and two templates asserted a minimum sample size "for statistical
+    # significance". A reporting trigger may decide which paragraph prints; it
+    # may never be called significance.
+    "> 15",
+    "is significant",
+    "significant correlation",
+    "statistical significance",
+    "poor petition quality",
+)
+
+
+@pytest.mark.parametrize("prompt_fn,kwargs", _CASES)
+async def test_prompt_text_carries_no_superseded_denial_framing(prompt_fn, kwargs):
+    text = (await prompt_fn(**kwargs)).lower()
+
+    hits = [phrase for phrase in _SUPERSEDED_PROMPT_PHRASES if phrase.lower() in text]
+    assert not hits, f"{prompt_fn.__name__} still emits {hits}"
+
+
+@pytest.mark.parametrize("prompt_fn,kwargs", _CASES)
+async def test_prompt_text_carries_the_shared_classification_rule(prompt_fn, kwargs):
+    """One statement of the rule, interpolated by all ten templates, so it
+    cannot drift between them."""
+    from fpd_mcp.prompts._classification import DECISION_NOTE
+
+    text = await prompt_fn(**kwargs)
+
+    assert DECISION_NOTE in text
+    assert "decisionPetitionTypeCodeDescriptionText" in text
+    assert "no quality signal on its own" in text.lower()

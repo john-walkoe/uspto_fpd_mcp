@@ -97,8 +97,13 @@ FPD_Get_petition_details
 **Expect:** petition record with `documentBag` containing doc
 `HY1J6ICXPXXIFW4`. The upstream `includeDocuments=true` 500 is still live
 (re-verified 2026-09-03), so also expect `document_metadata_source:
-"application_file_wrapper_fallback"` and `document_metadata_available: true`;
-with `include_documents: false` the petition record returns without documents.
+"application_file_wrapper_fallback"`, `document_metadata_available: true`,
+and a `document_metadata_note` that says in words that the bag is the
+APPLICATION'S FILE WRAPPER and not a petition bag, carrying the date the
+upstream 500 was last observed. The bag holds the whole prosecution history,
+so expect non-petition documents (office actions, claims, IDS) in it; that is
+correct, not a defect. With `include_documents: false` the petition record
+returns without documents.
 
 ### T6 FPD_get_document_download — persistent link ⭐
 ```
@@ -204,3 +209,17 @@ Run T1 with `LOG_LEVEL=DEBUG`. **Expect:** stderr/log files contain
 `Search request shape: query_chars=…` — never the applicant name or query
 text; any persistent-link hash appears truncated (`649b4597...`) or as
 `[LINK_HASH]`.
+
+### T18 `_bounds.items_total` agrees with `paging.total`
+```
+FPD_Search_petitions_balanced
+{"query": "ruleBag:\"37 CFR 1.137\"", "limit": 50}
+```
+**Expect:** `paging.total` is the number of matching petitions (53 on
+2026-09-03, and it grows). If the response also carries `_bounds` (it does
+whenever the guard shed rows to fit the budget), `_bounds.items_total`
+carries the SAME figure. The two disagreeing is a defect: before
+2026-09-03 this call returned `paging.total` 53 alongside
+`_bounds.items_total` 50, the page the guard had been handed.
+`_bounds.items_returned` is smaller than both, and correctly counts the
+records actually present in the response.

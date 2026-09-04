@@ -1,5 +1,6 @@
 """Art Unit Quality Assessment - Evaluate prosecution quality via petition patterns"""
 
+from ._classification import DECISION_NOTE
 from ._flags import flag
 
 
@@ -27,6 +28,8 @@ async def art_unit_quality_assessment_prompt(
     comparison_analysis = flag(comparison_analysis)
 
     return f"""Art Unit Quality Assessment - Prosecution Pattern Analysis
+
+{DECISION_NOTE}
 
 Inputs Provided:
 - Art Unit: "{art_unit}"
@@ -244,7 +247,9 @@ try:
 
     if ptab_challenges > 5:
         print(f"🚨 CORRELATION ALERT: {{ptab_challenges}} PTAB challenges detected")
-        print("   High petition rate + high PTAB challenges = Examination quality issues")
+        print("   A petition rate above your computed baseline plus high PTAB")
+        print("   challenge volume is an association to investigate, not a")
+        print("   finding. Report both denominators and read the records.")
 except:
     pass  # PTAB MCP may not be available
 ```

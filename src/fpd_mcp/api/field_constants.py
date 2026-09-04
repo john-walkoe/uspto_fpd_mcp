@@ -33,8 +33,12 @@ Baseline observed:
     eight minimal fields (patentNumber, firstApplicantName) were absent from
     both sampled records. A missing field is normal sparsity, NOT a wrong
     field name - do not "fix" a field name because a record lacks it.
-  - decisionPetitionTypeCode vocabulary (probed 2026-08-30; USPTO's own
-    description text, typos included). 551 is NOT revival - it is the single
+  - decisionPetitionTypeCode vocabulary as OBSERVED (probed 2026-08-30,
+    extended 2026-09-03; USPTO's own description text, typos included). This
+    list is not exhaustive and cannot be: USPTO publishes no enumerable
+    vocabulary, so a code absent from it is simply a code no probe has
+    returned yet. 562 and 529 were both missing here until 2026-09-03 while
+    live on 37 CFR 1.137 records. 551 is NOT revival - it is the single
     largest class in the corpus and it is PTA correction:
       501       TO REVIVE AN ABANDONED APPLICATION - UNAVOIDABLE DELAY
                 (37 CFR 1.137(a))
@@ -47,12 +51,22 @@ Baseline observed:
       515       TO INVOKE SUPERVISORY AUTHORITY - RE NON-PATENT EXAMINING
       519 / 520 Rule 1.182 matters
       525       TO WITHDRAW A HOLDING OF ABANDONMENT
+      529       To Withdraw A Holding of Abandonment in Pre-Exam Status
+                (probed 2026-09-03; USPTO writes this one in mixed case, not
+                the upper case the rest of the table uses. It is the
+                pre-examination counterpart of 525 and carries
+                37 CFR 1.137(b) in its ruleBag, which is why a revival
+                filter finds it)
       550 / 551 CORRECTION OF PATENT TERM ADJUSTMENT VALUE (before issue /
                 after issue; 714 records of 551)
+      562       REVIVE AN APPLICATION ABANDONED BY OPAP OR THE TC -
+                UNINTENTIONALLY DELAYED REPLY, ADDITIONAL INFORMATION
+                REQUIRED (37 CFR 1.137(A))
     '181' and '182' are CFR rule numbers, not type codes - querying either as
     decisionPetitionTypeCode returns HTTP 404. A revival can arrive under
-    several codes, so the dependable filter for a CFR-defined petition class
-    is a ruleBag clause, not a type code.
+    several codes - one ruleBag:"37 CFR 1.137" probe returned six distinct
+    ones (502, 503, 504, 525, 529, 562) - so the dependable filter for a
+    CFR-defined petition class is a ruleBag clause, not a type code.
   - technologyCenter and groupArtUnitNumber are stored as FOUR digits
     ('3600', '1600'; plus the non-numeric 'PFMU'). A two-digit prefix such as
     '21' matches nothing.
@@ -186,9 +200,15 @@ class QueryFieldNames:
 # === RED FLAG RULES FOR PETITION QUALITY ASSESSMENT ===
 class PetitionRedFlags:
     """
-    Common petition types and rules that indicate potential quality issues.
+    The CFR rules that classify a petition, plus the three decision outcomes.
 
-    Use these constants when analyzing petition patterns for red flags.
+    The RULE_* constants are the classification axis: with
+    decisionPetitionTypeCodeDescriptionText they say what relief was requested.
+    The DECISION_* constants say only whether it was granted. A DENIED decision
+    is the ordinary outcome in this corpus and carries no quality signal on its
+    own - whole classes (make-special and PPH requests under 37 CFR 1.102(a))
+    are refused as a matter of routine - so never derive a red flag from an
+    outcome alone. Use these constants when analyzing petition patterns.
     """
     # Revival petitions (application was abandoned)
     RULE_REVIVAL = "37 CFR 1.137"

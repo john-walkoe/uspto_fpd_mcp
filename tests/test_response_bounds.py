@@ -478,3 +478,86 @@ async def test_petition_details_small_response_has_no_bounds_key(mock_runtime):
 
     assert BOUNDS_KEY not in result
     assert "documents_note" not in result
+
+
+# ---------------------------------------------------------------------------
+# _bounds.items_total vs paging.total (QA ledger 2026-09-03, B7 finding F2)
+# ---------------------------------------------------------------------------
+# Observed live: FPD_Search_petitions_balanced(query='ruleBag:"37 CFR 1.137"',
+# limit=50) reported paging.total 53 and _bounds.items_total 50 in the same
+# response. The guard counts the page it was handed; paging knows the result
+# set. They must not disagree.
+
+async def test_bounds_items_total_agrees_with_paging_total():
+    from fpd_mcp.tools import _BoundedRegistrar
+
+    fake = _FakeMCP()
+
+    async def paged_tool():
+        return {
+            "petitionDecisionDataBag": [
+                {"id": i, "blob": "z" * 2_000} for i in range(50)
+            ],
+            "count": 53,
+            "paging": {
+                "limit_requested": 50,
+                "limit_applied": 50,
+                "offset": 0,
+                "returned": 50,
+                "total": 53,
+                "has_more": True,
+                "next_offset": 50,
+            },
+        }
+
+    _BoundedRegistrar(fake).tool(name="FPD_Search_petitions_balanced")(paged_tool)
+
+    result = await fake.registered["FPD_Search_petitions_balanced"]()
+
+    bounds = result[BOUNDS_KEY]
+    assert bounds["applied"] is True
+    assert bounds["items_total"] == result["paging"]["total"] == 53
+    # items_returned still counts what this response actually carries, which
+    # is the number paging.returned cannot know after rows were shed.
+    assert bounds["items_returned"] == len(result["petitionDecisionDataBag"])
+    assert bounds["items_returned"] < 50
+
+
+async def test_bounds_items_total_untouched_without_a_paging_block():
+    """FPD_Get_petition_details has no paging envelope; the guard's own count
+    stands, and the documents_total alias is not rewritten either."""
+    from fpd_mcp.tools import _BoundedRegistrar
+
+    fake = _FakeMCP()
+
+    async def details_tool():
+        return {
+            "petitionDecisionDataBag": [
+                {
+                    "petitionDecisionRecordIdentifier": "x",
+                    "documentBag": [
+                        {"documentIdentifier": str(i), "downloadOptionBag": ["z" * 900]}
+                        for i in range(80)
+                    ],
+                }
+            ]
+        }
+
+    _BoundedRegistrar(fake).tool(name="FPD_Get_petition_details")(details_tool)
+
+    result = await fake.registered["FPD_Get_petition_details"]()
+
+    assert "paging" not in result
+    # The guard's own count over the configured bags (80 documents + the 1
+    # petition record), left exactly as it was, alias included.
+    assert result[BOUNDS_KEY]["items_total"] == 81
+    assert result["documents_total"] == 81
+
+
+def test_reconcile_is_a_no_op_without_a_bounds_marker():
+    from fpd_mcp.tools import _reconcile_bounds_items_total
+
+    payload = {"paging": {"total": 53}}
+    assert _reconcile_bounds_items_total(payload) is payload
+    assert BOUNDS_KEY not in payload
+    assert _reconcile_bounds_items_total("not a dict") == "not a dict"

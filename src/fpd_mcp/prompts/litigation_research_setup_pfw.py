@@ -1,5 +1,6 @@
 """Litigation Research Setup - Prosecution + petition history requiring PFW MCP"""
 
+from ._classification import DECISION_NOTE
 from ._flags import flag
 
 
@@ -31,6 +32,8 @@ async def litigation_research_setup_prompt(
     include_prosecution = flag(include_prosecution)
 
     return f"""Litigation Research Setup - Prosecution + Petition Analysis
+
+{DECISION_NOTE}
 
 Inputs Provided:
 - Patent Number: "{patent_number}"
@@ -150,7 +153,7 @@ if litigation_data['application_number']:
                         'type': 'ABANDONMENT_REVIVAL',
                         'severity': 'HIGH' if decision == 'DENIED' else 'MEDIUM',
                         'description': f"Application abandoned - Revival petition {{'denied' if decision == 'DENIED' else 'granted'}}",
-                        'litigation_impact': 'Abandonment history may indicate prosecution quality issues or deadline management problems'
+                        'litigation_impact': 'The abandonment itself is the fact of record here; whether the revival petition was granted or denied is a separate question, and a denial is not evidence about the prosecution'
                     }})
                 elif any('1.181' in rule for rule in rules):
                     petition_info['type'] = 'Examiner Dispute (37 CFR 1.181)'
@@ -159,7 +162,7 @@ if litigation_data['application_number']:
                         'type': 'EXAMINER_DISPUTE',
                         'severity': 'MEDIUM',
                         'description': f"Supervisory review requested - {{decision}}",
-                        'litigation_impact': 'Examiner disputes may expose prosecution strategy weaknesses or claim issues'
+                        'litigation_impact': 'A 37 CFR 1.181 petition puts a contested examiner action on the record; read the petition and the decision for what was actually disputed, and do not infer anything from whether it was granted'
                     }})
                 elif any('1.182' in rule for rule in rules):
                     petition_info['type'] = 'Restriction (37 CFR 1.182)'
@@ -380,7 +383,8 @@ Petition Litigation Impact Analysis:
 
 ** HIGH LITIGATION RISK:**
 - Denied revival petitions -> Questions about diligent prosecution
-- Multiple examiner disputes -> Potential examination quality issues
+- Multiple examiner disputes -> a contested prosecution on the record; read the
+  petitions themselves rather than inferring from their outcomes
 - Denied restriction petitions -> Claim scope and breadth concerns
 
 WARNING: MODERATE LITIGATION CONSIDERATIONS:
@@ -466,7 +470,7 @@ Comprehensive Litigation Package:
 - Cross-MCP correlation insights and strategic analysis
 
 Attorney Work Product:
-- Prosecution strength/weakness analysis
+- Prosecution history analysis, from the documents rather than from outcomes
 - Petition history explanation and strategy
 - Document prioritization for litigation team
 - Discovery and evidence collection roadmap

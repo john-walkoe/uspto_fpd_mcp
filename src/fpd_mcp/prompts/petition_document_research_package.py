@@ -1,5 +1,6 @@
 """Petition Document Research Package - Collect comprehensive petition documents"""
 
+from ._classification import DECISION_NOTE
 from ._flags import flag
 
 
@@ -27,6 +28,8 @@ async def petition_document_research_package_prompt(
     extract_text = flag(extract_text, default=False)
 
     return f"""Petition Document Research Package - Comprehensive Case Analysis
+
+{DECISION_NOTE}
 
 Inputs Provided:
 - Petition Identifier: "{petition_identifier}"
@@ -336,7 +339,7 @@ For high-priority documents, use `FPD_get_document_content_with_ocr`:
 
 ** PTAB Integration (if granted patent):**
 - Patent challenge assessment
-- Petition red flags -> PTAB vulnerability correlation
+- Petition history (by rule, not by outcome) -> PTAB vulnerability correlation
 - Post-grant challenge strategy implications
 
 ## EXPECTED DELIVERABLES

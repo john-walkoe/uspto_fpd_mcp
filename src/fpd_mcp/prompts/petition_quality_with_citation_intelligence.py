@@ -1,5 +1,6 @@
 """Petition Quality with Citation Intelligence - Enhanced with citation data from Enhanced Citations MCP"""
 
+from ._classification import DECISION_NOTE
 from ._flags import flag
 
 
@@ -34,6 +35,8 @@ async def petition_quality_with_citation_intelligence_prompt(
     include_citation_analysis = flag(include_citation_analysis)
 
     return f"""Art Unit Quality Assessment with Citation Intelligence
+
+{DECISION_NOTE}
 
 Analysis Configuration:
 - Art Unit: {art_unit}
@@ -296,7 +299,9 @@ Use Enhanced Citations MCP to assess citation quality:
 
 Correlate petition patterns with citation quality:
 
-1. LOW CITATION QUALITY + HIGH PETITION RATE = WARNING: Art unit quality issues
+1. LOW CITATION QUALITY + a petition rate above the baseline you computed for
+   comparable art units = an association worth reading the records behind.
+   State both denominators. There is no threshold that makes it a verdict
    - Examiner citation rate below 50%
    - Multiple petitions per application
    - Pattern suggests inadequate prosecution

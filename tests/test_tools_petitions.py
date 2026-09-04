@@ -383,3 +383,198 @@ async def test_by_application_with_documents_requests_no_projection(mock_runtime
     )
 
     assert mock_runtime.api_client.search_by_application.await_args.kwargs["fields"] is None
+
+
+# ---------------------------------------------------------------------------
+# Decision framing (QA ledger 2026-09-03, tester report B7 finding F1)
+# ---------------------------------------------------------------------------
+# The served llm_guidance used to assert that DENIED "indicates potential
+# quality issues" / "weak arguments or procedural errors" / "weak prosecution
+# practices". The corpus is overwhelmingly DENIED and routine make-special/PPH
+# requests are refused as a matter of course, so that framing primed every
+# reader toward the wrong inference on nearly every call. The classification
+# axis is decisionPetitionTypeCodeDescriptionText + ruleBag.
+
+_QUALITY_INFERENCE_PHRASES = (
+    "indicates potential quality issues",
+    "weak arguments or procedural errors",
+    "weak arguments or procedural problems",
+    "weak prosecution practices",
+)
+
+
+def _guidance_text(result):
+    import json
+
+    return json.dumps(result["llm_guidance"])
+
+
+def _assert_denial_framing(result):
+    text = _guidance_text(result)
+    lowered = text.lower()
+    for phrase in _QUALITY_INFERENCE_PHRASES:
+        assert phrase not in lowered, f"guidance still asserts {phrase!r}"
+    classification = result["llm_guidance"]["classification"]
+    assert "decisionPetitionTypeCodeDescriptionText" in classification["axis"]
+    assert "ruleBag" in classification["axis"]
+    assert "no quality signal on its own" in classification["denial_is_not_a_signal"].lower()
+
+
+async def test_minimal_guidance_does_not_frame_denial_as_a_quality_flag(mock_runtime):
+    mock_runtime.api_client.search_petitions.return_value = _search_result()
+
+    result = await fpd_search_petitions_minimal(applicant_name="Apple")
+
+    _assert_denial_framing(result)
+
+
+async def test_balanced_guidance_does_not_frame_denial_as_a_quality_flag(mock_runtime):
+    mock_runtime.api_client.search_petitions.return_value = _search_result()
+
+    result = await fpd_search_petitions_balanced(applicant_name="Apple", limit=10)
+
+    _assert_denial_framing(result)
+
+
+async def test_by_art_unit_guidance_does_not_frame_denial_as_a_quality_flag(mock_runtime):
+    mock_runtime.api_client.search_by_art_unit.return_value = _search_result()
+
+    result = await fpd_search_petitions_by_art_unit(art_unit="2128")
+
+    _assert_denial_framing(result)
+    # And no invented rate threshold: a baseline must be computed, not assumed.
+    no_threshold = result["llm_guidance"]["classification"]["no_rate_threshold"]
+    assert "no threshold" in no_threshold.lower()
+    assert "%" not in no_threshold
+
+
+async def test_by_application_guidance_does_not_frame_denial_as_a_quality_flag(mock_runtime):
+    mock_runtime.api_client.search_by_application.return_value = _search_result()
+
+    result = await fpd_search_petitions_by_application(application_number="17896175")
+
+    _assert_denial_framing(result)
+
+
+async def test_details_guidance_does_not_frame_denial_as_a_quality_flag(mock_runtime):
+    mock_runtime.api_client.get_petition_by_id.return_value = {
+        "petitionDecisionDataBag": [
+            {"petitionDecisionRecordIdentifier": _PETITION_ID, "documentBag": []}
+        ]
+    }
+
+    result = await fpd_get_petition_details(petition_id=_PETITION_ID)
+
+    _assert_denial_framing(result)
+    denied = result["llm_guidance"]["legal_analysis"]["outcome_significance"]["DENIED"]
+    assert "ordinary outcome" in denied
+
+
+# ---------------------------------------------------------------------------
+# Petition type table (QA ledger 2026-09-03)
+# ---------------------------------------------------------------------------
+# 562 and 529 are live on 37 CFR 1.137 records but were missing from the served
+# table, so a reader who treated it as exhaustive concluded that a 562 revival
+# was not a revival.
+
+def test_balanced_docstring_lists_the_live_revival_type_codes():
+    doc = fpd_search_petitions_balanced.__doc__
+
+    assert "| 562 |" in doc
+    assert "| 529 |" in doc
+    assert "ADDITIONAL INFORMATION REQUIRED (37 CFR 1.137(A))" in doc
+    # 529's description, recovered live 2026-09-03; USPTO's own mixed case.
+    assert "To Withdraw A Holding of Abandonment in Pre-Exam Status" in doc
+    assert "not recorded here" not in doc
+
+
+def test_balanced_docstring_says_the_type_table_is_not_exhaustive():
+    doc = fpd_search_petitions_balanced.__doc__
+
+    assert "OBSERVED, NOT EXHAUSTIVE" in doc
+    assert "Filter on `ruleBag`, not on a type code" in doc
+
+
+def test_field_constants_provenance_lists_the_live_revival_type_codes():
+    from fpd_mcp.api import field_constants
+
+    provenance = field_constants.__doc__
+    assert "562" in provenance
+    assert "529" in provenance
+    assert "To Withdraw A Holding of Abandonment in Pre-Exam Status" in provenance
+    assert "not exhaustive" in provenance
+
+
+# ---------------------------------------------------------------------------
+# Coverage wording (QA ledger 2026-09-03)
+# ---------------------------------------------------------------------------
+# "the decisions data itself starts with 2022-and-later decisions" read as a
+# cutoff. It is a completeness floor: art unit 2128's three petitions were
+# decided in 2011, 2014 and 2015, and records as early as 2003 are present.
+
+def test_every_search_tool_describes_2022_as_a_completeness_floor():
+    for fn in (
+        fpd_search_petitions_minimal,
+        fpd_search_petitions_balanced,
+        fpd_search_petitions_by_art_unit,
+        fpd_search_petitions_by_application,
+    ):
+        doc = fn.__doc__
+        assert "COMPLETENESS FLOOR, not a cutoff" in doc, fn.__name__
+        assert "the decisions data itself starts with" not in doc, fn.__name__
+        assert "2003" in doc, fn.__name__
+
+
+async def test_by_application_zero_result_guidance_is_a_floor_not_a_cutoff(mock_runtime):
+    mock_runtime.api_client.search_by_application.return_value = {
+        "petitionDecisionDataBag": [], "count": 0,
+    }
+
+    result = await fpd_search_petitions_by_application(application_number="17896175")
+
+    meaning = result["llm_guidance"]["interpretation"]["no_petitions"]["meaning"]
+    caveat = result["llm_guidance"]["interpretation"]["no_petitions"]["caveat"]
+    assert "COMPLETENESS FLOOR, not a cutoff" in meaning
+    # The old text told the reader an older decision "is simply absent here",
+    # which is the cutoff reading the floor replaces.
+    assert "simply absent here" not in caveat
+    assert "partial" in caveat
+
+
+# ---------------------------------------------------------------------------
+# firstApplicantName sparsity (QA ledger 2026-09-03, B7 finding F3)
+# ---------------------------------------------------------------------------
+# Measured 2026-09-03: absent on 47 of 53 revival records and 98 of 100
+# examiner-dispute records, so an applicant_name filter reaches only the
+# minority of records carrying the field.
+
+def test_applicant_name_parameter_documents_the_field_sparsity():
+    minimal = fpd_search_petitions_minimal.__doc__
+    assert "SPARSE" in minimal
+    assert "47 of 53" in minimal
+    assert "98 of 100" in minimal
+    assert "inconclusive" in minimal
+    assert "FPD_Search_petitions_by_application" in minimal
+
+    balanced = fpd_search_petitions_balanced.__doc__
+    assert "SPARSE firstApplicantName" in balanced
+
+
+def test_details_docstring_treats_an_absent_field_as_null_or_empty():
+    doc = fpd_get_petition_details.__doc__
+    assert "**Absent fields:**" in doc
+    assert "same case as null or empty" in doc
+
+
+def test_details_docstring_names_the_wrapper_fallback_and_its_observation_date():
+    doc = fpd_get_petition_details.__doc__
+
+    assert "APPLICATION'S FILE WRAPPER, not a\npetition bag" in doc
+    assert "2026-09-03" in doc
+    assert "application_file_wrapper_fallback" in doc
+
+
+def test_by_application_include_documents_names_the_wrapper_bag():
+    doc = fpd_search_petitions_by_application.__doc__
+
+    assert "APPLICATION'S\n  FILE WRAPPER, not a petition bag" in doc

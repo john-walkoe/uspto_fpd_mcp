@@ -81,7 +81,7 @@ def _get_overview_section() -> str:
 - **ultra_context**: PFW fields parameter + ultra-minimal workflows
 - **extraction**: Extraction-tier selection for speed and quality
 - **limits**: Active response budgets, the `_bounds`/`_window` markers, paging
-- **coverage**: Dataset coverage bounds (2001+ filings; decisions data from 2022, backfilled monthly)
+- **coverage**: Dataset coverage bounds (2001+ filings; 2022 is a completeness floor for decisions, not a cutoff)
 
 ### Context Efficiency Benefits:
 - **80-95% token reduction** (2-8KB per section vs 62KB total)
@@ -426,7 +426,9 @@ application as proof that no art was cited without having queried both lanes.
 **Red Flags:**
 - Examiner citation ratio below 50% (inadequate search)
 - Low citation density (<5 citations) in citation-heavy tech
-- High petition rate (>15%) correlating with low citation quality
+- A petition rate well above the baseline you computed for comparable art units in
+  the same session, correlating with low citation quality. There is no fixed
+  threshold; see the `red_flags` section, "Art Unit Petition Rate"
 
 ### Workflow 2: Examiner Dispute Petitions with Citation Correlation
 
@@ -803,10 +805,19 @@ def _get_red_flags_section() -> str:
 **Workflow:** Check PFW for abandonment reason and post-revival quality
 **Context:** Procedural compliance issues during prosecution
 
-**Petition Type Codes:** 501 (unavoidable delay), 502 (unintentional delay, OPAP/TC).
-NOT 551 — that is CORRECTION OF PATENT TERM ADJUSTMENT, an unrelated and much
-larger class. Type codes are incomplete for this class; filter on
-ruleBag:"37 CFR 1.137" to catch every revival.
+**Petition Type Codes (observed, not exhaustive):** 501 (unavoidable delay),
+502 (unintentional delay, OPAP/TC), 562 (unintentional delay, OPAP/TC,
+additional information required, 37 CFR 1.137(A)), and 529, whose description
+reads "To Withdraw A Holding of Abandonment in Pre-Exam Status". 529 is the
+pre-examination counterpart of 525 and carries 37 CFR 1.137(b) in its ruleBag,
+which is why a revival filter finds it. NOT 551, which is CORRECTION OF PATENT
+TERM ADJUSTMENT, an unrelated and much larger class.
+**The code list is observed, not published.** A code missing from it is a code
+no probe has returned, not a code that does not exist; 562 and 529 were absent
+from this section until 2026-09-03 while live on revival records. One
+ruleBag:"37 CFR 1.137" probe returned six distinct codes (502, 503, 504, 525,
+529, 562), so filter on ruleBag:"37 CFR 1.137" to catch every revival and use
+the type code only to sub-divide a set already selected by rule.
 
 ### Examiner Disputes
 
@@ -842,13 +853,24 @@ type code — querying it returns nothing.
 **Petition Type Code:** 503. 183 is the CFR rule number, not a type code —
 querying it returns nothing.
 
-### Denied Petitions
+### Denied Petitions Are Not A Red Flag
 
 **Indicator:** decisionTypeCodeDescriptionText: DENIED
-**Meaning:** Director denied the petition
-**Context:** Unsuccessful arguments or procedural errors
-**Workflow:** Review petition details to understand why denied
-**Red Flag Severity:** High - indicates documented procedural problems
+**Meaning:** the Director did not grant the relief that was requested. Nothing more.
+A denial carries no quality signal on its own.
+**Context:** DENIED is the ordinary outcome across this corpus, and whole petition
+classes are refused as a matter of routine. A petition to make special or a PPH
+request under 37 CFR 1.102(a) is the common example, and such a refusal is a
+scheduling decision, not a finding about the application or the practitioner.
+**Classification axis:** decisionPetitionTypeCodeDescriptionText and ruleBag say
+what was ASKED FOR; decisionTypeCodeDescriptionText says only whether it was
+granted. Classify on the first two, then read the outcome inside a single
+petition type. A denial rate computed across mixed types measures the mix, not
+quality.
+**Workflow:** Read the decision document (FPD_Get_petition_details ->
+FPD_get_document_content_with_ocr) before characterizing any denial.
+**Red Flag Severity:** None on its own. The signal, when there is one, lives in
+the rule the petition was filed under, not in the outcome.
 
 ### Multiple Petitions
 
@@ -858,13 +880,24 @@ querying it returns nothing.
 **Workflow:** Use PFW to correlate petition dates with prosecution events
 **Red Flag Severity:** Very High - pattern of prosecution issues
 
-### Art Unit Red Flags
+### Art Unit Petition Rate
 
-**Indicator:** Art unit petition rate >15%
-**Calculation:** (petitions / applications) * 100
-**Meaning:** Systematic art unit quality issues
+**Calculation:** (petitions in the art unit / applications in the art unit) * 100
+**No fixed threshold.** This section used to serve "above 15 percent" as the
+trigger. That number had no measured basis: art unit petition rates on this
+corpus run far below one percent, so a 15 percent trigger fires on nothing and
+teaches a reader to expect rates two orders of magnitude off what the data holds.
+**Establish the baseline in the same session:** run the same calculation over two
+or three comparable art units in the same technology center and the same date
+window, and report the art unit against those. If no baseline was computed, report
+the raw counts and say so; do not call a rate high or low against nothing.
+**Same population on both sides:** the numerator (petitions) and the denominator
+(applications) must be drawn from the same filing-date and decision-date bounds,
+or the rate is comparing disjoint sets of applications.
+**Small numbers are not rates:** an art unit with a handful of petitions produces a
+percentage that moves by whole multiples on one record. Report counts, not a rate,
+below a denominator you are willing to defend.
 **Workflow:** Break down by examiner, check citation quality
-**Context:** May indicate training gaps or examination problems
 """
 
 
@@ -1029,8 +1062,12 @@ Use Case: Map applications to patents for PTAB cross-reference
    ```
 2. Extract application numbers
 3. For each application: `FPD_Search_petitions_by_application(application_number=app_num)`
-4. Aggregate petition statistics: revival rate, dispute rate, denial rate
-5. Pattern: High petition rate = examiner quality issues
+4. Aggregate petition statistics by petition type and ruleBag: revival count,
+   dispute count. A denial rate across mixed petition types measures the mix, not
+   quality; see the `red_flags` section, "Denied Petitions Are Not A Red Flag"
+5. Pattern: a petition rate well above the baseline you computed for comparable
+   examiners in the same session is worth reading the underlying records for.
+   There is no fixed threshold
 
 **Benefit:** Analyze 100 examiner applications vs 20 without fields parameter
 
@@ -1178,6 +1215,11 @@ nothing was dropped.
   `truncated` = whole records were dropped.
 - `items_returned` / `items_total`: records (or, for a page-capped OCR,
   pages). `items_total` is `null` only when the true total is unknown.
+- When the response also carries a `paging` block, `_bounds.items_total`
+  reports the SAME figure as `paging.total`; the two never disagree. Use
+  either for the size of the result set. `items_returned` is the count of
+  records this response actually carries after the guard shed rows, which
+  is the one number `paging.returned` cannot give you.
 - Always read `note` - it names the call that recovers what was dropped.
 - Legacy aliases kept for this release: `documents_returned`,
   `documents_total`, `documents_note`, `truncated`, `truncation_note`.
@@ -1232,19 +1274,56 @@ The search covers "final agency petition decisions in publicly available
 patent applications and patents that were filed in 2001 or later."
 Petitions in applications filed before 2001 are out of scope entirely.
 
-### 2. Decisions-data start (the decisions themselves)
+### 2. Decisions-data completeness floor (the decisions themselves)
 
 "Petition decisions data are incrementally added to ODP on a monthly basis
 starting with data from 2022 and later." The release notes at
 https://data.uspto.gov/support/release list what is currently available.
 
+**2022 is a completeness floor, not a cutoff.** Decisions from well before it
+are in the dataset: art unit 2128's three petitions were decided in 2011, 2014
+and 2015, and records as early as 2003 have been returned. What the 2022 line
+marks is where coverage becomes systematic. Below it, coverage is real but
+partial and uneven, and there is no way to tell from a response which older
+decisions are held and which are not. Never tell a user that this dataset
+"starts in 2022" or that an older petition is out of scope; it may well be here.
+
+### 3. Field-level coverage: firstApplicantName is sparse
+
+The two coverage bounds above are about which RECORDS exist. A third gap is
+about which FIELDS a record carries. `firstApplicantName` is the one that
+catches people out: it is frequently absent. Measured 2026-09-03 as a one-time
+sample, it was missing on 47 of 53 records matching ruleBag:"37 CFR 1.137" and
+on 98 of 100 records matching ruleBag:"37 CFR 1.181".
+
+Consequences:
+
+- `applicant_name` (and a raw `firstApplicantName:` clause) searches only the
+  minority of records that carry the field. A zero or a thin result is
+  inconclusive about that party, not evidence it filed no petitions.
+- To cover a company properly, go through applications: get its serials from the
+  PFW MCP, then run FPD_Search_petitions_by_application on each. That path does
+  not depend on the field being populated.
+- The same applies to `patentNumber`, which is absent on records whose
+  application never issued or had not issued when the record was written.
+
+**Absent, null and empty are the same case.** This API OMITS a field it has no
+value for rather than returning it as null or as an empty string, in search hits
+and in FPD_Get_petition_details alike, including inside nested objects. A key
+missing from a response is therefore normal sparsity and NOT evidence of a wrong
+field name: if the sibling fields on the same nested object came back populated,
+the path was right and the record simply has no value. Never "fix" a field name
+because one record lacks it, and never report an absent field as a data error.
+
 ### What a zero result means
 
-- A zero result for a petition decided BEFORE 2022 is expected and says
-  nothing about whether a petition existed or was decided. Do not report
-  "no petitions" for pre-2022 activity; report that the decision predates
-  the dataset. (Real case: a 2007 petition in application 11/752,072
-  returns zero here even though it exists in the file wrapper.)
+- A zero result for a petition decided BEFORE 2022 is inconclusive. It may be a
+  genuine absence or a gap in the partial pre-2022 coverage, and the response
+  cannot distinguish them. Do not report "no petitions" for older activity, and
+  do not report that the decision predates the dataset either. Report that the
+  dataset's pre-2022 coverage is partial and that this query did not find one.
+  (Real case: a 2007 petition in application 11/752,072 returns zero here even
+  though it exists in the file wrapper.)
 - A zero result only starts to mean "no decision" for petitions decided in
   2022 or later, and even then it is subject to the monthly incremental
   backfill; check the release notes URL above for the current extent.

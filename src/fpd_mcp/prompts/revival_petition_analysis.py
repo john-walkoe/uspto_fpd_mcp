@@ -1,5 +1,6 @@
 """Revival Petition Analysis - Find abandonment patterns and revival success rates"""
 
+from ._classification import DECISION_NOTE
 from ._flags import flag
 
 
@@ -30,6 +31,8 @@ async def revival_petition_analysis_prompt(
     include_reasoning = flag(include_reasoning)
 
     return f"""Revival Petition Analysis - Abandonment Risk Assessment
+
+{DECISION_NOTE}
 
 Inputs Provided:
 - Company Name: "{company_name}"
@@ -190,9 +193,14 @@ print("\\n### ABANDONMENT RISK INDICATORS\\n")
 if abandonment_frequency > 5:
     print("🚨 **HIGH ABANDONMENT FREQUENCY** - Systemic docketing or prosecution management issues")
 if revival_success_rate < 60:
-    print("🚨 **LOW REVIVAL SUCCESS RATE** - Poor petition quality or procedural compliance issues")
+    print("**LOW REVIVAL GRANT RATE** - expected, not a finding. Revival petitions in")
+    print("this corpus are denied as a matter of course, so a low grant rate describes")
+    print("the corpus rather than this portfolio. Report the counts and move on.")
 if revival_results['denied'] > 5:
-    print("🚨 **MULTIPLE DENIED REVIVALS** - Pattern suggests inadequate justification or systemic problems")
+    print("**MULTIPLE REVIVAL PETITIONS** - the applications went abandoned and")
+    print("revival was sought. That is the fact. Revivals in this corpus are")
+    print("denied as a matter of course, so the denials add nothing to it; read")
+    print("the decisions if the reason for each abandonment matters.")
 
 if risk_score >= 80:
     print("✅ **EXCELLENT PROSECUTION MANAGEMENT** - Minimal abandonment risk")
@@ -304,23 +312,24 @@ Typical Success Factors:
 
 ## RISK ASSESSMENT FRAMEWORK
 
-**[OK] LOW ABANDONMENT RISK:**
-- <2% revival petition rate
-- >80% revival success rate
-- Consistent prosecution management
-- Proactive deadline management
+**There are no published bands for this.** This section used to print three
+(under 2%, 2-5%, over 5% revival petition rate, paired with revival "success
+rate" bands of over 80%, 60-80% and under 60%). Neither axis survives contact
+with the data: revival petitions in this corpus are denied as a matter of
+course, so a success-rate band sorts every portfolio into the worst bucket, and
+observed petition rates run far below the lowest band's floor.
 
-**[PENDING] MODERATE ABANDONMENT RISK:**
-- 2-5% revival petition rate
-- 60-80% revival success rate
-- Occasional procedural issues
-- Room for process improvement
+Report instead:
 
-** HIGH ABANDONMENT RISK:**
-- >5% revival petition rate
-- <60% revival success rate
-- Systemic procedural failures
-- Poor prosecution management
+- The raw counts: applications examined, applications with a revival petition,
+  and the petitions by rule and type code.
+- The revival petition rate, next to the SAME rate computed for two or three
+  comparable portfolios or art units in this session. If you did not compute a
+  comparison, say the rate is unbenchmarked and leave it at that.
+- What each abandonment was, from the decision documents, when the reason
+  matters. That is the fact of record; whether the revival was granted is a
+  separate question and the denials carry no signal of their own.
+- No success rate, and no risk grade you cannot show the arithmetic for.
 
 ## CROSS-MCP INTEGRATION
 
@@ -341,7 +350,8 @@ This reveals:
 
 ** With PTAB MCP:**
 Check if revived patents faced post-grant challenges:
-- Difficult prosecution -> potential weak patents
+- Difficult prosecution -> more procedural history to read; it is not by itself
+  evidence about the resulting claims
 - Revival circumstances -> prosecution strategy issues
 
 ## EXPECTED DELIVERABLES

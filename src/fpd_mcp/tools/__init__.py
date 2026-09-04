@@ -130,6 +130,45 @@ _TOOL_BOUNDS: Dict[str, Dict[str, Any]] = {
 _DEFAULT_BOUNDS: Dict[str, Any] = {"bags": ()}
 
 
+def _reconcile_bounds_items_total(payload: Any) -> Any:
+    """Make `_bounds.items_total` report the same figure as `paging.total`.
+
+    The shared guard counts `items_total` from the bags PRESENT IN THE
+    RESPONSE it was handed, which on a search page is the page, not the
+    result set. Observed 2026-09-03 on
+    FPD_Search_petitions_balanced(query='ruleBag:"37 CFR 1.137"', limit=50):
+    `paging.total` said 53 (the real number of matching petitions) while
+    `_bounds.items_total` said 50 (the page the guard was given). Two
+    authoritative-looking totals disagreeing by three records is exactly the
+    kind of thing a reader resolves the wrong way, and a reader told to check
+    `_bounds` before saying "only N exist" would have said 50.
+
+    Where the response carries a paging block that knows the true total, that
+    figure wins and `_bounds` reports it, so the marker reads "returned N of
+    total M" with M the same number `paging` gives. `items_returned` is left
+    alone: it still counts the records this response actually carries, which
+    is the one thing `paging.returned` cannot know after the guard sheds rows.
+
+    The legacy `documents_total` alias is deliberately NOT re-mirrored. It
+    describes the documentBag, not the petition result set, so it keeps the
+    guard's own count.
+
+    Runs on every tool result, not only guarded ones: `_bounds` can also be
+    attached earlier by petitions._bound_details_response, in which case the
+    guard here is a no-op and would never see the marker.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    bounds = payload.get(response_bounds.BOUNDS_KEY)
+    paging = payload.get("paging")
+    if not isinstance(bounds, dict) or not isinstance(paging, dict):
+        return payload
+    total = paging.get("total")
+    if isinstance(total, int) and bounds.get("items_total") != total:
+        bounds["items_total"] = total
+    return payload
+
+
 def _bound_result(result: Any, tool_name: str) -> Any:
     """Apply the shared guard to one tool result (dict or JSON string)."""
     config = dict(_TOOL_BOUNDS.get(tool_name) or _DEFAULT_BOUNDS)
@@ -142,7 +181,9 @@ def _bound_result(result: Any, tool_name: str) -> Any:
     )
 
     if isinstance(result, dict):
-        return response_bounds.bound_structured_response(result, **config)
+        return _reconcile_bounds_items_total(
+            response_bounds.bound_structured_response(result, **config)
+        )
 
     if isinstance(result, str) and result.lstrip().startswith("{"):
         try:
@@ -154,7 +195,7 @@ def _bound_result(result: Any, tool_name: str) -> Any:
         bounded = response_bounds.bound_structured_response(parsed, **config)
         if response_bounds.BOUNDS_KEY not in bounded:
             return result  # no-op: hand back the original string byte-for-byte
-        return json.dumps(bounded, default=str)
+        return json.dumps(_reconcile_bounds_items_total(bounded), default=str)
 
     return result
 

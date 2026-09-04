@@ -483,12 +483,23 @@ Returns: 8 essential fields - petition ID, application number, patent number, ap
 decision type, petition mail date, decision date, deciding office.
 
 **Coverage:** final petition decisions in publicly available applications and patents
-filed in 2001 or later; the decisions data itself starts with 2022-and-later decisions,
-backfilled incrementally monthly. A zero result for a petition decided before 2022 is
-expected and does not mean no petition existed (see FPD_get_guidance section='coverage').
+filed in 2001 or later. USPTO adds decisions monthly and describes that load as
+starting with 2022 and later, which is a COMPLETENESS FLOOR, not a cutoff: decisions
+from well before 2022 are present, and records as early as 2003 have been returned.
+Pre-2022 coverage is real but partial and uneven, so a zero result for an older
+petition is inconclusive rather than a finding (see FPD_get_guidance
+section='coverage').
 
 **Convenience Parameters:**
-- `applicant_name`: Company/party name (e.g., 'Apple Inc.')
+- `applicant_name`: Company/party name (e.g., 'Apple Inc.'). Filters on
+  firstApplicantName, which is SPARSE: many records simply do not carry it (in a
+  2026-09-03 sample it was absent on 47 of 53 revival records and on 98 of 100
+  examiner-dispute records). A name filter therefore reaches only the records that
+  happen to have the field, so a zero or a small result is inconclusive rather
+  than a finding about that party. To cover a party properly, get its application
+  serials from the PFW MCP and run FPD_Search_petitions_by_application on each.
+  Absent, null and empty are the same case here: the API omits a field it has no
+  value for rather than returning it as null
 - `application_number`: Application number (e.g., '17414168')
 - `patent_number`: Patent number if granted (e.g., '12252554')
 - `decision_type`: Outcome — 'DENIED', 'GRANTED' or 'DISMISSED'. The public corpus is overwhelmingly DENIED; GRANTED and DISMISSED are rare but real, so a small result set for either is a real answer, not a broken filter. There is no filter-value validation, so a misspelling and a genuinely empty class both return zero — check the spelling before concluding a class is absent
@@ -586,10 +597,31 @@ FPD_Search_petitions_minimal(query="machine learning", decision_type="DENIED", l
             "Cross-reference with PFW using applicationNumberText for prosecution history",
             "Cross-reference with PTAB using patentNumber for post-grant challenges"
         ],
+        "classification": {
+            "axis": (
+                "Classify a petition by decisionPetitionTypeCodeDescriptionText and "
+                "ruleBag, which say what was ASKED FOR, before reading "
+                "decisionTypeCodeDescriptionText, which says only whether that "
+                "request was granted."
+            ),
+            "denial_is_not_a_signal": (
+                "DENIED is the ordinary outcome across this corpus, and whole "
+                "classes are refused as a matter of routine (a petition to make "
+                "special or a PPH request under 37 CFR 1.102(a) is the common "
+                "example). A denial carries NO quality signal on its own. Compare a "
+                "denial only against the same petition type, never against the "
+                "corpus as a whole, and read the decision document before "
+                "characterizing it."
+            )
+        },
         "red_flags": {
             "revival_petitions": "Look for ruleBag containing '37 CFR 1.137' (abandoned applications)",
             "examiner_disputes": "Look for ruleBag containing '37 CFR 1.181' (supervisory review)",
-            "denied_petitions": "decisionTypeCodeDescriptionText: 'DENIED' indicates potential quality issues"
+            "denied_petitions": (
+                "Not a red flag by itself. See llm_guidance.classification: the "
+                "petition type and ruleBag carry the meaning, the decision value "
+                "does not."
+            )
         }
     }
 
@@ -634,12 +666,19 @@ Returns: 18 key fields including petition type, art unit, technology center, pro
 legal issues, CFR rules cited, statutes cited, entity status, and invention title.
 
 **Coverage:** final petition decisions in publicly available applications and patents
-filed in 2001 or later; the decisions data itself starts with 2022-and-later decisions,
-backfilled incrementally monthly. A zero result for a petition decided before 2022 is
-expected and does not mean no petition existed (see FPD_get_guidance section='coverage').
+filed in 2001 or later. USPTO adds decisions monthly and describes that load as
+starting with 2022 and later, which is a COMPLETENESS FLOOR, not a cutoff: decisions
+from well before 2022 are present, and records as early as 2003 have been returned.
+Pre-2022 coverage is real but partial and uneven, so a zero result for an older
+petition is inconclusive rather than a finding (see FPD_get_guidance
+section='coverage').
 
 **All Minimal Parameters (9) - same as FPD_Search_petitions_minimal:**
-- `applicant_name`, `application_number`, `patent_number`
+- `applicant_name` (filters on the SPARSE firstApplicantName field: many records
+  do not carry it, so a zero result is inconclusive rather than a finding about
+  that party. Absent, null and empty are the same case, and cross-referencing
+  application serials from PFW is the reliable route to a party's petitions),
+  `application_number`, `patent_number`
 - `decision_type`, `deciding_office`
 - `petition_date_start/end`, `decision_date_start/end`
 
@@ -654,7 +693,8 @@ expected and does not mean no petition existed (see FPD_get_guidance section='co
 - `entity_status`: Entity type — 'Small', 'Micro' or 'Regular Undiscounted'.
   There is no 'Large' and no bare 'Undiscounted'
 
-**Petition type codes (probed live 2026-08-30; the descriptions are USPTO's, typos included):**
+**Petition type codes (OBSERVED live, not exhaustive; probed 2026-08-30 and
+extended 2026-09-03. The descriptions are USPTO's, typos included):**
 | code | meaning |
 |---|---|
 | 501 | TO REVIVE AN ABANDONED APPLICATION - UNAVOIDABLE DELAY (37 CFR 1.137(a)) |
@@ -663,14 +703,27 @@ expected and does not mean no petition existed (see FPD_get_guidance section='co
 | 504 | TO INVOKE SUPERVISORY AUTHORITY RE - PATENT EXAMINING (37 CFR 1.181, incl. restriction under 1.144) |
 | 519 / 520 | Rule 1.182 matters (name/order changes; matters not otherwise provided for) |
 | 525 | TO WITHDRAW A HOLDING OF ABANDONMENT |
+| 529 | To Withdraw A Holding of Abandonment in Pre-Exam Status (the pre-examination counterpart of 525; carries 37 CFR 1.137(b) in its ruleBag) |
 | 550 / 551 | CORRECTION OF PATENT TERM ADJUSTMENT VALUE (before issue / after issue) |
+| 562 | REVIVE AN APPLICATION ABANDONED BY OPAP OR THE TC - UNINTENTIONALLY DELAYED REPLY, ADDITIONAL INFORMATION REQUIRED (37 CFR 1.137(A)) |
+
+**THIS TABLE IS OBSERVED, NOT EXHAUSTIVE.** It lists the codes that live probes
+have returned; USPTO publishes no vocabulary this server can enumerate, so a
+code absent here is not a code that does not exist. 562 and 529 were both
+missing from the table until 2026-09-03 even though both are live on revival
+records, and a reader who treated the table as complete would have concluded
+that a 562 revival was not a revival.
 
 **551 IS NOT REVIVAL.** It is the PTA-correction code and it is the single
 largest class in the corpus (714 records), so a search that means "revival" and
-sends 551 silently returns hundreds of unrelated PTA corrections. Type codes are
-also incomplete: a revival can arrive under several codes. The dependable route
-to a CFR-defined petition class is a `ruleBag` clause through the raw `query`
-parameter, which has no convenience parameter of its own.
+sends 551 silently returns hundreds of unrelated PTA corrections.
+
+**Filter on `ruleBag`, not on a type code.** One CFR class arrives under several
+codes (a single 37 CFR 1.137 probe returned six distinct codes: 502, 503, 504,
+525, 529 and 562), so a type-code filter silently drops part of the class. The
+dependable route to a CFR-defined petition class is a `ruleBag` clause through
+the raw `query` parameter, which has no convenience parameter of its own. Use
+`petition_type_code` only to sub-divide a set already selected by rule.
 
 **Examples:**
 ```python
@@ -773,10 +826,28 @@ FPD_Search_petitions_balanced(
             "ptab_challenges": "PTAB_search_trials_minimal(patent_number=X) if patentNumber present",
             "art_unit_analysis": "FPD_Search_petitions_by_art_unit(art_unit=X) for pattern analysis"
         },
+        "classification": {
+            "axis": (
+                "decisionPetitionTypeCodeDescriptionText and ruleBag are the "
+                "classification axis: they say what relief was requested. "
+                "decisionTypeCodeDescriptionText says only whether it was granted."
+            ),
+            "denial_is_not_a_signal": (
+                "DENIED is the ordinary outcome across this corpus, and routine "
+                "make-special and PPH requests under 37 CFR 1.102(a) are refused as "
+                "a matter of course. A denial carries NO quality signal on its own; "
+                "compare it only within its own petition type and read the decision "
+                "document before characterizing it."
+            )
+        },
         "red_flags": {
             "revival_37cfr1137": "Application abandoned - revival petition filed",
             "dispute_37cfr1181": "Examiner conflict - supervisory review petition",
-            "denied_petition": "Director denied - weak arguments or procedural errors"
+            "denied_petition": (
+                "Not a red flag by itself. See llm_guidance.classification: the "
+                "petition type and ruleBag carry the meaning, the decision value "
+                "does not."
+            )
         },
         "next_steps": [
             "FPD_Get_petition_details for full details + documents",
@@ -803,9 +874,12 @@ Art unit, technology center, examiner behavior, group, unit number, quality anal
 Returns balanced field set for cross-referencing with PFW examiner data and PTAB challenge rates.
 
 **Coverage:** final petition decisions in publicly available applications and patents
-filed in 2001 or later; the decisions data itself starts with 2022-and-later decisions,
-backfilled incrementally monthly. A zero result for a petition decided before 2022 is
-expected and does not mean no petition existed (see FPD_get_guidance section='coverage').
+filed in 2001 or later. USPTO adds decisions monthly and describes that load as
+starting with 2022 and later, which is a COMPLETENESS FLOOR, not a cutoff: decisions
+from well before 2022 are present, and records as early as 2003 have been returned.
+Pre-2022 coverage is real but partial and uneven, so a zero result for an older
+petition is inconclusive rather than a finding (see FPD_get_guidance
+section='coverage').
 
 **Example:**
 - FPD_Search_petitions_by_art_unit(art_unit="2128", limit=50)
@@ -816,7 +890,14 @@ expected and does not mean no petition existed (see FPD_get_guidance section='co
 - High petition frequency → Difficult examiners or challenging technology
 - Frequent revival petitions (37 CFR 1.137) → Docketing/procedural issues
 - Examiner disputes (37 CFR 1.181) → Communication/quality problems
-- Denied petitions → Weak prosecution practices
+- Denied petitions → nothing on their own. DENIED is the ordinary outcome here and
+  routine make-special/PPH requests are refused as a matter of course. Group by
+  decisionPetitionTypeCodeDescriptionText and ruleBag first, then read outcomes
+  within a single petition type
+- There is no threshold at which an art unit's petition rate becomes an outlier.
+  Compute the same rate for two or three comparable art units in the same
+  technology center and date window in the SAME session, or report raw counts and
+  say no baseline was established
 
 **Cross-MCP integration:**
 - applicationNumberText → PFW_search_applications_minimal with fields parameter for examiner names
@@ -882,14 +963,41 @@ expected and does not mean no petition existed (see FPD_get_guidance section='co
             "examiner_disputes": "Multiple 37 CFR 1.181 → Communication/quality issues",
             "ptab_correlation": "High petitions + high PTAB invalidation → Quality issues"
         },
+        "classification": {
+            "axis": (
+                "Group this art unit's petitions by "
+                "decisionPetitionTypeCodeDescriptionText and ruleBag before reading "
+                "any outcome. Those fields say what was requested; "
+                "decisionTypeCodeDescriptionText says only whether it was granted."
+            ),
+            "denial_is_not_a_signal": (
+                "DENIED is the ordinary outcome across this corpus, and routine "
+                "make-special and PPH requests under 37 CFR 1.102(a) are refused as "
+                "a matter of course. A denial carries NO quality signal on its own, "
+                "so an art unit whose petitions are all DENIED has shown nothing "
+                "about its examination quality."
+            ),
+            "no_rate_threshold": (
+                "There is no threshold at which a petition rate marks an art unit as "
+                "an outlier. Establish a baseline in the same session by running the "
+                "same calculation over two or three comparable art units in the same "
+                "technology center and date window, or report the raw counts and say "
+                "no baseline was established. Numerator and denominator must cover "
+                "the same filing and decision-date population."
+            )
+        },
         "next_steps": [
             "Use PFW_search_applications_minimal with fields parameter for examiner mapping",
             "Group petitions by examiner to identify individual patterns",
-            "Check GRANTED/DENIED outcomes to assess Director overturn rates",
+            "Group by petition type and ruleBag, then read outcomes within one type",
             "Cross-reference patentNumbers with PTAB for challenge correlation"
         ],
         "red_flags": {
-            "high_denial_rate": "Weak prosecution practices",
+            "high_denial_rate": (
+                "Not a red flag. See llm_guidance.classification: denial rates in "
+                "this corpus are dominated by petition classes that are refused "
+                "routinely."
+            ),
             "multiple_examiners": "Art unit-wide problem",
             "temporal_clustering": "Process breakdown in specific periods"
         }
@@ -911,9 +1019,12 @@ Petition history for one application or patent, did this case file a petition, b
 **Use for:** Complete petition history, red flag identification, cross-referencing with PFW prosecution timeline.
 
 **Coverage:** final petition decisions in publicly available applications and patents
-filed in 2001 or later; the decisions data itself starts with 2022-and-later decisions,
-backfilled incrementally monthly. A zero result for a petition decided before 2022 is
-expected and does not mean no petition existed (see FPD_get_guidance section='coverage').
+filed in 2001 or later. USPTO adds decisions monthly and describes that load as
+starting with 2022 and later, which is a COMPLETENESS FLOOR, not a cutoff: decisions
+from well before 2022 are present, and records as early as 2003 have been returned.
+Pre-2022 coverage is real but partial and uneven, so a zero result for an older
+petition is inconclusive rather than a finding (see FPD_get_guidance
+section='coverage').
 
 **Examples:**
 - Basic petition check: FPD_Search_petitions_by_application(application_number="17414168")
@@ -923,7 +1034,9 @@ expected and does not mean no petition existed (see FPD_get_guidance section='co
 - Multiple petitions → Difficult prosecution (missed deadlines, examiner conflicts)
 - Revival petitions (37 CFR 1.137) → Application was abandoned
 - Examiner disputes (37 CFR 1.181) → Contentious relationship with examiner
-- Denied petitions → Unsuccessful arguments, potential prosecution quality issues
+- Denied petitions → nothing on their own. Classify on
+  decisionPetitionTypeCodeDescriptionText and ruleBag first; DENIED is the ordinary
+  outcome here and routine make-special/PPH requests are refused as a matter of course
 
 **Cross-MCP integration:**
 1. Use PFW_search_applications_minimal with fields parameter for prosecution context
@@ -949,13 +1062,14 @@ expected and does not mean no petition existed (see FPD_get_guidance section='co
   False here, whereas FPD_Get_petition_details defaults it True — this is a
   page of records where the bag is identical on every one of them, that is a
   single record where the bag is the reason to call it). The FPD search
-  endpoint serves no documentBag of its own, so the bag
-  comes from the APPLICATION FILE WRAPPER — the same source
-  FPD_Get_petition_details serves today, and labelled as such in
-  `document_metadata_source`. It is the application's whole prosecution history
+  endpoint serves no documentBag of its own, so the bag is the APPLICATION'S
+  FILE WRAPPER, not a petition bag: the same source FPD_Get_petition_details
+  serves today, labelled in `document_metadata_source` and stated in words in
+  `document_metadata_note`. It is the application's whole prosecution history
   (office actions, claims, IDS, ...), not only the petition papers, and it is
-  identical on every petition of this application. Costs one extra USPTO call;
-  leave it False for a plain petition-history check
+  identical on every petition of this application, so filter it before
+  describing it as one petition's documents. Costs one extra USPTO call; leave
+  it False for a plain petition-history check
 - limit: Maximum petition records to return (default 100, max 100 — a larger
   value is clamped, not rejected, and the response then carries `limit_clamped`)
 - offset: Starting position for paging (default 0). The response's `paging`
@@ -1011,15 +1125,19 @@ expected and does not mean no petition existed (see FPD_get_guidance section='co
         "interpretation": {
             "no_petitions": {
                 "meaning": (
-                    "No final petition decisions in the covered dataset. Coverage floors apply: "
-                    "applications filed 2001 or later, decisions data from 2022 and later "
-                    "(monthly incremental). For prosecution that concluded before 2022 a zero "
-                    "result says nothing about whether a petition was ever filed or decided."
+                    "No final petition decisions in the covered dataset. Coverage bounds "
+                    "apply: applications filed 2001 or later, and a monthly incremental "
+                    "load USPTO describes as starting with 2022 and later. 2022 is a "
+                    "COMPLETENESS FLOOR, not a cutoff - decisions from well before it are "
+                    "present, records as early as 2003 have been returned - but pre-2022 "
+                    "coverage is partial, so for prosecution that concluded before 2022 a "
+                    "zero result says little about whether a petition was filed or decided."
                 ),
                 "caveat": (
-                    "Do not read an empty result as clean prosecution on an older application; "
-                    "a petition decided before the 2022 decisions floor is simply absent here. "
-                    "Only for post-2022 activity does zero support a no-petition inference."
+                    "Do not read an empty result as clean prosecution on an older "
+                    "application: an older decision may simply be one this partial "
+                    "pre-2022 coverage does not hold. Zero supports a no-petition "
+                    "inference only for 2022-and-later activity."
                 )
             },
             "single_petition": {
@@ -1038,14 +1156,32 @@ expected and does not mean no petition existed (see FPD_get_guidance section='co
             "step_3": "Identify prosecution events that triggered petitions",
             "step_4": "If patented, use PTAB_search_trials_minimal to check PTAB challenges"
         },
+        "classification": {
+            "axis": (
+                "decisionPetitionTypeCodeDescriptionText and ruleBag are the "
+                "classification axis: they say what relief was requested. "
+                "decisionTypeCodeDescriptionText says only whether it was granted."
+            ),
+            "denial_is_not_a_signal": (
+                "DENIED is the ordinary outcome across this corpus, and routine "
+                "make-special and PPH requests under 37 CFR 1.102(a) are refused as "
+                "a matter of course. A denial on this application carries NO quality "
+                "signal on its own; read the petition type, the ruleBag and the "
+                "decision document before characterizing it."
+            )
+        },
         "petition_pattern_analysis": {
             "revival_only": "Application was abandoned and revived - check PFW for abandonment reason",
             "examiner_disputes": "37 CFR 1.181 petitions indicate examiner conflicts - may affect PTAB risk",
             "restriction_petitions": "37 CFR 1.182 petitions indicate claim scope issues",
-            "denied_petitions": "DENIED outcomes suggest weak arguments or procedural problems"
+            "denied_petitions": (
+                "Not a pattern by itself. See llm_guidance.classification: the "
+                "petition type and ruleBag carry the meaning, the decision value "
+                "does not."
+            )
         },
         "next_steps": [
-            "Review petition types and outcomes to identify red flags",
+            "Group petitions by type and ruleBag before reading any outcome",
             "Cross-reference with PFW prosecution timeline",
             "If multiple petitions, assess whether systematic or case-specific issues",
             "If granted, check PTAB for correlation between petition history and challenge success",
@@ -1078,15 +1214,26 @@ Full record for one petition, all fields, document list, documentBag, document i
 - Full legal context (all issues, CFR rules, statutes cited)
 - Complete timeline (petition filed → decision issued)
 
-**What documentBag actually contains:** USPTO's petition-details
-includeDocuments=true endpoint has been erroring upstream since at least
-2026-07, so documentBag is currently served from the APPLICATION FILE WRAPPER
-instead — the whole prosecution history (office actions, claims, specification,
-IDS, 892/1449 forms, abandonment notices), not just the petition papers. The
-substitution is labelled: check `document_metadata_source` before treating the
-bag as petition-only, and expect to filter it. When the substitution itself
-fails, `document_metadata_available` is false — an absent bag then means
-"metadata unavailable", never "this petition has no documents".
+**What documentBag actually contains: the APPLICATION'S FILE WRAPPER, not a
+petition bag.** USPTO's petition-details includeDocuments=true endpoint has been
+answering HTTP 500 since at least 2026-07 and was still erroring when last
+observed on 2026-09-03, so documentBag is served from the application file
+wrapper instead: the whole prosecution history (office actions, claims,
+specification, IDS, 892/1449 forms, abandonment notices), not just the papers
+filed with or issued on this petition, and identical on every petition of the
+same application. The response says so in words in `document_metadata_note`,
+and `document_metadata_source` is `application_file_wrapper_fallback`. Filter
+the bag before describing it as this petition's documents; the petition papers
+are the PET/PETDEC/PPH.DECISION-style entries within it. When the substitution
+itself fails, `document_metadata_available` is false, and an absent bag then
+means "metadata unavailable", never "this petition has no documents".
+
+**Absent fields:** this API omits a field it has no value for rather than
+returning it as null or as an empty string, nested objects included. An absent
+key is therefore the same case as null or empty: normal sparsity, not a wrong
+field name and not a data error. firstApplicantName in particular is frequently
+missing (see FPD_get_guidance section='coverage'). If the sibling fields on the
+same object came back populated, the path was right and this record has no value.
 
 **Document access:**
 - Use documentIdentifier from documentBag with FPD_get_document_download for browser access
@@ -1138,13 +1285,31 @@ fails, `document_metadata_available` is false — an absent bag then means
                 "Supporting exhibits - Additional documents filed with petition"
             ]
         },
+        "classification": {
+            "axis": (
+                "decisionPetitionTypeCodeDescriptionText and ruleBag are the "
+                "classification axis: they say what relief this petition requested. "
+                "decisionTypeCodeDescriptionText says only whether it was granted."
+            ),
+            "denial_is_not_a_signal": (
+                "DENIED is the ordinary outcome across this corpus, and routine "
+                "make-special and PPH requests under 37 CFR 1.102(a) are refused as "
+                "a matter of course. A denial carries NO quality signal on its own; "
+                "read the decision document and compare only within this petition's "
+                "own type."
+            )
+        },
         "legal_analysis": {
             "cfr_rules": "Check ruleBag for CFR citations (e.g., 37 CFR 1.137, 1.181, 1.182)",
             "statutes": "Check statuteBag for statutory basis (e.g., 35 USC 134)",
             "issues": "Review petitionIssueConsideredTextBag for specific issues raised",
             "outcome_significance": {
-                "GRANTED": "Director agreed with petitioner - examiner/office action modified",
-                "DENIED": "Director upheld examiner/office - petition unsuccessful",
+                "GRANTED": "Director granted the relief requested",
+                "DENIED": (
+                    "Director did not grant the relief requested. This is the "
+                    "ordinary outcome here and is not, on its own, a finding about "
+                    "the petition's merits or the prosecution's quality"
+                ),
                 "DISMISSED": "Petition withdrawn or moot - no substantive decision"
             }
         },
@@ -1155,10 +1320,10 @@ fails, `document_metadata_available` is false — an absent bag then means
             "examiner_analysis": "Get examiner name from PFW, check if pattern of petitions against this examiner"
         },
         "next_steps": [
-            "Review decision outcome and legal basis (ruleBag, statuteBag)",
+            "Read the petition type and legal basis (ruleBag, statuteBag) before the outcome",
             "Use FPD_get_document_download to access petition/decision PDFs if needed",
             "Cross-reference with PFW prosecution timeline for context",
-            "Assess red flag significance based on petition type and outcome"
+            "Judge the outcome only within this petition's own type, never against the corpus"
         ]
     }
 

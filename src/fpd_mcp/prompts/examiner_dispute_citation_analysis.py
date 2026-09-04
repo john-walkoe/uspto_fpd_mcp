@@ -1,5 +1,6 @@
 """Examiner Dispute Citation Analysis - Analyze citation patterns in dispute petitions"""
 
+from ._classification import DECISION_NOTE
 from ._flags import flag
 
 
@@ -37,6 +38,8 @@ async def examiner_dispute_citation_analysis_prompt(
 
     return f"""Examiner Dispute Citation Analysis - Prosecution Quality Assessment
 
+{DECISION_NOTE}
+
 Analysis Configuration:
 - Examiner Name: {examiner_name}
 - Art Unit: {art_unit}
@@ -44,7 +47,9 @@ Analysis Configuration:
 - Date Range Start: {date_range_start}
 - Include Comparison Analysis: {include_comparison}
 
-WORKFLOW: Correlate examiner dispute petitions with citation patterns to identify prosecution quality issues.
+WORKFLOW: Correlate 37 CFR 1.181 supervisory-review petitions (the RULE is the
+signal, not the outcome) with citation patterns, to see whether disputed
+applications differ from undisputed ones in the same art unit.
 
 ## COMPLETE IMPLEMENTATION WITH ERROR HANDLING
 
@@ -217,12 +222,16 @@ print(f"✅ **Citation Analysis Complete**\\n")
 # PHASE 4: Correlation and Pattern Detection
 print("**PHASE 4: Detecting Citation-Dispute Correlations...**\\n")
 
-# Determine if there's a significant correlation
+# The difference is REPORTED, never graded. No significance test is applied
+# here, and none is available from these counts.
 citation_difference = citation_comparison['non_disputed']['examiner_citation_rate'] - citation_comparison['disputed']['examiner_citation_rate']
 
-correlation_detected = False
-if abs(citation_difference) > 15:  # >15% difference is significant
-    correlation_detected = True
+# This prompt's own reporting trigger. It decides which paragraph gets
+# printed and nothing else. It is not a significance test, not an effect
+# size and not a benchmark, and a difference above it must never be
+# described as significant, correlated or detected.
+REPORTING_TRIGGER_POINTS = 15
+above_reporting_trigger = abs(citation_difference) > REPORTING_TRIGGER_POINTS
 
 # PHASE 5: PRESENTATION - Analysis Report
 print("\\n## EXAMINER DISPUTE CITATION ANALYSIS REPORT\\n")
@@ -244,24 +253,34 @@ if "{include_comparison}" == "true":
     print(f"| Total Citations | {{citation_comparison['disputed']['total_citations']}} | {{citation_comparison['non_disputed']['total_citations']}} | - |")
 
 # Correlation Assessment
-if correlation_detected:
-    print("\\n### 🚨 SIGNIFICANT CORRELATION DETECTED\\n")
+print("\\n### OBSERVED DIFFERENCE, WITH ITS DENOMINATORS\\n")
+print(f"Examiner citation rate differs by {{citation_difference:.1f}} percentage points between the two groups.")
+print(f"- Disputed: {{citation_comparison['disputed']['apps_analyzed']}} applications, {{citation_comparison['disputed']['total_citations']}} citations, rate {{citation_comparison['disputed']['examiner_citation_rate']:.1f}}%")
+print(f"- Non-disputed: {{citation_comparison['non_disputed']['apps_analyzed']}} applications, {{citation_comparison['non_disputed']['total_citations']}} citations, rate {{citation_comparison['non_disputed']['examiner_citation_rate']:.1f}}%")
+print("No significance test was applied to this difference, and none is")
+print(f"available from these counts. The {{REPORTING_TRIGGER_POINTS}}-point line below is this prompt's own")
+print("reporting trigger for which paragraph to print, not a measured threshold.")
+print("Report the difference with both sample sizes, and say that no test was applied.\\n")
 
+if above_reporting_trigger:
     if citation_difference > 0:
-        print("**Finding:** Disputed applications have LOWER examiner citation rates than non-disputed applications.\\n")
-        print("**Interpretation:**")
-        print("- Examiner may not be conducting thorough prior art searches")
-        print("- Inadequate citation of relevant prior art may lead to applicant objections")
-        print("- Quality of examination process may need improvement\\n")
+        print("**Observed:** the disputed applications have the LOWER examiner citation rate.\\n")
+        print("**Candidate explanations, none established by this comparison:**")
+        print("- a narrower prior art search on those applications")
+        print("- a technology area where fewer references are cited generally")
+        print("- the small sample: check the two application counts above before reading anything into the gap")
+        print("Read the office actions and the petitions themselves before preferring one.\\n")
     else:
-        print("**Finding:** Disputed applications have HIGHER examiner citation rates than non-disputed applications.\\n")
-        print("**Interpretation:**")
-        print("- Complex applications may require more citations and generate disputes")
-        print("- Examiner may be citing extensively due to difficult prior art landscape")
-        print("- Technology complexity rather than quality issues may drive disputes\\n")
+        print("**Observed:** the disputed applications have the HIGHER examiner citation rate.\\n")
+        print("**Candidate explanations, none established by this comparison:**")
+        print("- complex applications draw both more citations and more disputes")
+        print("- a crowded prior art landscape in this technology")
+        print("- the small sample: check the two application counts above before reading anything into the gap")
+        print("Read the office actions and the petitions themselves before preferring one.\\n")
 else:
-    print("\\n### ✅ NO SIGNIFICANT CORRELATION\\n")
-    print("Citation patterns are similar between disputed and non-disputed applications.\\n")
+    print("**Observed:** the two groups' examiner citation rates are close.\\n")
+    print("That is a description of this sample, not a finding that no relationship")
+    print("exists. Report the difference and the sample sizes, and stop there.\\n")
 
 # RECOMMENDED ACTIONS
 print("### RECOMMENDED ACTIONS\\n")
@@ -331,7 +350,11 @@ except:
     pass  # Graceful degradation
 ```
 
-** TRIPLE-MCP CORRELATION**: Combining PFW prosecution data, FPD examiner disputes, and Enhanced Citations patterns reveals examination quality issues impossible to detect from single data sources.
+** TRIPLE-MCP CORRELATION**: Combining PFW prosecution data, FPD examiner
+disputes (37 CFR 1.181) and Enhanced Citations patterns shows correlations no
+single source shows. A correlation is not a cause: report it as a measured
+association with its denominators, never as a finding that examination was
+deficient.
 
 ## PHASE 1: Examiner Dispute Discovery (PFW -> FPD)
 
@@ -394,13 +417,18 @@ Compare citation patterns between disputed and non-disputed applications:
    - Citation category diversity (X/Y/NPL balance)
 
 3. PETITION OUTCOME CORRELATION:
-   - Cross-reference petition decisions (GRANTED/DENIED) with citation patterns
-   - GRANTED petitions + low citation quality = WARNING: examiner performance issue
-   - DENIED petitions + normal citations = applicant strategy issue
+   - Cross-reference petition decisions with citation patterns WITHIN the
+     37 CFR 1.181 class only. Across classes the decision value tracks the mix
+     of petition types, not the examiner
+   - A GRANTED supervisory-review petition is the rare case where the outcome
+     does carry information: the Director disturbed the examiner's action.
+     Report the count, read the decision, and do not extrapolate from it
+   - A DENIED supervisory-review petition says only that the action stood
 
 ## PHASE 4: Examiner Performance Assessment
 
-Assess whether citation patterns indicate systemic quality issues:
+Assess whether citation patterns differ measurably from the art unit baseline
+you computed, and report the comparison rather than a verdict:
 
 1. Citation thoroughness scoring:
    - Below average citation density -> [OK] CONCERN
@@ -422,7 +450,8 @@ Comprehensive Analysis Report:
 
 Strategic Recommendations:
 - Examiner citation quality assessment
-- Training recommendations (if quality issues identified)
+- Observed differences from the baseline, with denominators, and what they do
+  and do not support
 - Applicant strategy insights (if disputes unwarranted)
 - Art unit quality improvement opportunities
 
@@ -442,7 +471,9 @@ IMPORTANT WORKFLOW NOTES:
 2. Both citation lanes are documented as covering Office Actions MAILED from Oct 1, 2017 to ~30 days prior; Run BOTH citation lanes (Citations_search_citations_* enriched AND Citations_search_oa_citations_* raw 892/1449) and union the results - neither is a superset of the other.
 3. Applications filed 2015-2016+ typically have citation data due to 1-2 year prosecution delays
 4. Use ultra-context reduction (fields parameter) in PFW for 5x broader discovery
-5. Minimum 20 applications needed for statistical significance
+5. Small samples: report the application count on both sides of every
+   comparison. No sample size in this prompt was chosen by a power
+   calculation, so do not describe any result as statistically significant
 
 CITATION METRICS DEFINITIONS:
 - examinerCitedReferenceIndicator: true = examiner cited, false = applicant cited

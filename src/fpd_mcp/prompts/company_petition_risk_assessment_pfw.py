@@ -1,5 +1,6 @@
 """Company Petition Risk Assessment - Due diligence and risk assessment requiring PFW MCP"""
 
+from ._classification import DECISION_NOTE
 from ._flags import flag
 
 
@@ -40,6 +41,8 @@ async def company_petition_risk_assessment_prompt(
     include_details = flag(include_details)
 
     return f"""# Company Petition Risk Assessment - Due Diligence Workflow
+
+{DECISION_NOTE}
 
 **Inputs Provided:**
 - Company Name: "{company_name}"
@@ -214,7 +217,7 @@ print("\\n### PETITION PATTERNS\\n")
 print(f"- **Revival Petitions (37 CFR 1.137):** {{red_flags['patterns']['revival']}} - Abandonment frequency")
 print(f"- **Examiner Disputes (37 CFR 1.181):** {{red_flags['patterns']['examiner_disputes']}} - Communication issues")
 print(f"- **Restriction Petitions (37 CFR 1.182):** {{red_flags['patterns']['restriction']}} - Claim scope disputes")
-print(f"- **Denied Petitions:** {{red_flags['patterns']['denied']}} - Failed petition attempts")
+print(f"- **Denied Petitions:** {{red_flags['patterns']['denied']}} - the ordinary outcome in this corpus; not a risk signal on its own, see the reading rule above")
 
 # RISK SCORE CALCULATION
 risk_score = (len(red_flags['high_risk']) * 10) + (len(red_flags['medium_risk']) * 5)
