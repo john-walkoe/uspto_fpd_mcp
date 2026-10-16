@@ -93,8 +93,10 @@ def validate_application_number(app_number: Optional[str]) -> Optional[str]:
     if not app_number:
         return None
 
-    # Remove whitespace and clean format
-    clean_number = app_number.strip().replace("/", "").replace(" ", "")
+    # Remove whitespace and clean format. The printed serial form "19/353,487"
+    # carries a slash AND a comma; stripping only the slash left "19353,487"
+    # and a 400 (skills tester round 2, 2026-10-07).
+    clean_number = app_number.strip().replace("/", "").replace(",", "").replace(" ", "")
 
     if not clean_number:
         return None
@@ -105,7 +107,10 @@ def validate_application_number(app_number: Optional[str]) -> Optional[str]:
 
     # Check if all characters are digits
     if not clean_number.isdigit():
-        raise ValidationError("Application number should contain only digits", generate_request_id())
+        raise ValidationError(
+            "Application number should contain only digits (the printed form "
+            "'19/353,487' is accepted too)", generate_request_id()
+        )
 
     return clean_number
 

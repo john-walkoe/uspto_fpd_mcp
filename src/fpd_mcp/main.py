@@ -15,6 +15,16 @@ Environment Variables:
         USPTO_DOWNLOAD_TIMEOUT: Document download/OCR timeout in seconds (default: 60.0)
 """
 
+# ARCH-02 (review 2026-09-28): load this repo's own .env BEFORE anything
+# else. This must be the first import in this module — the very next
+# import (runtime, below) constructs Settings() as an import-time side
+# effect, which previously ran before .env was ever loaded (the old load
+# lived inside run_server()'s function body, reached only after this whole
+# module had already finished importing). See env_bootstrap's docstring.
+from .env_bootstrap import load_repo_env
+
+load_repo_env()
+
 # FastMCP 4 / mcp-types 2 dropped extra="allow" on ToolAnnotations, which
 # silently strips the `defer_loading` flag off every tool. Must run before any
 # tool is registered. See fastmcp_compat for the full rationale. Applied here

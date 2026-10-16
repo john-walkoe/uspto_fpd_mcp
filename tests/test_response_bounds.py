@@ -234,15 +234,38 @@ def test_window_text_char_unit():
     assert result["text"] == text[:1_000]
 
 
-def test_window_text_page_unit_snaps_to_page_boundaries():
+def test_window_text_page_edges_snap_to_page_boundaries():
     result = window_text(_PAGES, offset=0, max_chars=2_000)
 
     window = result[WINDOW_KEY]
-    assert window["unit"] == "page"
+    # `edges` records the snapping; `unit` names the counters, which are
+    # characters whether or not the edges snapped (re-vendored from PTAB,
+    # CR-D review 2026-09-28: FPD's `unit` used to read "page" directly
+    # above four character counters).
+    assert window["edges"] == "page"
+    assert window["unit"] == "char"
     assert window["returned"] <= 2_000
     # The window ends exactly where a page marker begins.
     assert _PAGES[window["next_offset"]:].startswith("=== PAGE ")
     assert result["text"].startswith("=== PAGE 1 ===")
+
+
+def test_window_text_single_oversized_page_degrades_to_char_edges():
+    text = "=== PAGE 1 ===\n" + "q" * 5_000
+
+    result = window_text(text, max_chars=1_000)
+
+    assert result[WINDOW_KEY]["edges"] == "char"
+    assert result[WINDOW_KEY]["unit"] == "char"
+    assert result[WINDOW_KEY]["returned"] == 1_000
+
+
+def test_window_unit_always_reports_characters():
+    """The counters are characters in every case, and the label says so."""
+    paged = window_text(_PAGES, offset=0, max_chars=2_000)[WINDOW_KEY]
+    raw = window_text("y" * 10_000, max_chars=1_000)[WINDOW_KEY]
+
+    assert paged["unit"] == raw["unit"] == "char"
 
 
 def test_window_text_cursor_walks_the_whole_document():
@@ -284,6 +307,7 @@ def test_window_marker_vocabulary_is_exact():
 
     assert set(result[WINDOW_KEY]) == {
         "unit",
+        "edges",
         "offset",
         "returned",
         "total",
@@ -430,12 +454,20 @@ def _big_petition():
                         FPDFields.DOCUMENT_IDENTIFIER: f"DOC{i:04d}",
                         FPDFields.DOCUMENT_CODE: "PET",
                         FPDFields.PAGE_COUNT: 4,
+                        # CR-59/MCP-9 (review 2026-09-28): downloadOptionBag
+                        # is now stripped unconditionally, BEFORE the size
+                        # guard ever sees the response (see
+                        # _strip_raw_document_urls), so it can no longer be
+                        # the field that pushes this fixture over budget.
+                        # A different heavy, non-keep_fields field does the
+                        # same job of exercising stage-1 slimming.
                         FPDFields.DOWNLOAD_OPTION_BAG: [
                             {
                                 FPDFields.MIME_TYPE_IDENTIFIER: "PDF",
                                 FPDFields.DOWNLOAD_URL: "https://api.uspto.gov/" + "x" * 300,
                             }
                         ],
+                        "legacyExaminerNotes": "z" * 300,
                     }
                     for i in range(120)
                 ],
@@ -481,14 +513,16 @@ async def test_petition_details_small_response_has_no_bounds_key(mock_runtime):
 
 
 # ---------------------------------------------------------------------------
-# _bounds.items_total vs paging.total (QA ledger 2026-09-03, B7 finding F2)
+# _bounds.items_total vs paging.total (ARCH-03, review 2026-09-28)
 # ---------------------------------------------------------------------------
-# Observed live: FPD_Search_petitions_balanced(query='ruleBag:"37 CFR 1.137"',
-# limit=50) reported paging.total 53 and _bounds.items_total 50 in the same
-# response. The guard counts the page it was handed; paging knows the result
-# set. They must not disagree.
+# FPD used to rewrite `_bounds.items_total` to `paging.total` after the
+# guard ran, redefining the canonical marker's meaning against PTAB and PFW
+# (neither has an equivalent rewrite). Removed: `items_total` is the shared
+# guard's own count (items in the bag(s) it was handed), same as every
+# sibling repo; `paging.total`, unaffected by the guard, remains the place
+# to read the full result-set size.
 
-async def test_bounds_items_total_agrees_with_paging_total():
+async def test_bounds_items_total_is_the_guards_own_count_not_paging_total():
     from fpd_mcp.tools import _BoundedRegistrar
 
     fake = _FakeMCP()
@@ -516,11 +550,18 @@ async def test_bounds_items_total_agrees_with_paging_total():
 
     bounds = result[BOUNDS_KEY]
     assert bounds["applied"] is True
-    assert bounds["items_total"] == result["paging"]["total"] == 53
-    # items_returned still counts what this response actually carries, which
-    # is the number paging.returned cannot know after rows were shed.
-    assert bounds["items_returned"] == len(result["petitionDecisionDataBag"])
-    assert bounds["items_returned"] < 50
+    # paging.total (the full result set) is untouched by the guard...
+    assert result["paging"]["total"] == 53
+    # ...items_total is the page the guard was HANDED (50), and
+    # items_returned is what it KEPT after trimming — same meaning as PTAB
+    # and PFW, no longer mirrored from paging.total.
+    kept = len(result["petitionDecisionDataBag"])
+    assert bounds["items_total"] == 50
+    assert bounds["items_returned"] == kept
+    assert kept < 50
+    assert result["paging"]["returned"] == kept
+    assert result["paging"]["next_offset"] == kept
+    assert result["paging"]["has_more"] is True
 
 
 async def test_bounds_items_total_untouched_without_a_paging_block():
@@ -554,10 +595,211 @@ async def test_bounds_items_total_untouched_without_a_paging_block():
     assert result["documents_total"] == 81
 
 
-def test_reconcile_is_a_no_op_without_a_bounds_marker():
-    from fpd_mcp.tools import _reconcile_bounds_items_total
+# ---------------------------------------------------------------------------
+# Paging honesty: a trimmed page reports what it carries (2026-09-11). FPD_Search_petitions_minimal(decision_type="DENIED", limit=100)
+# went over the budget, the guard kept 50 rows, and `paging` still said
+# returned 100 / next_offset 100, so a caller paging by next_offset skipped
+# rows 50-99 without being told.
+# ---------------------------------------------------------------------------
 
-    payload = {"paging": {"total": 53}}
-    assert _reconcile_bounds_items_total(payload) is payload
-    assert BOUNDS_KEY not in payload
-    assert _reconcile_bounds_items_total("not a dict") == "not a dict"
+_PAGING_SPEC = {"key": "paging", "path": ["rows"]}
+
+
+def _page(offset: int, n: int, total: int, blob: int = 400) -> dict:
+    has_more = offset + n < total
+    return {
+        "rows": [{"i": offset + k, "blob": "z" * blob} for k in range(n)],
+        "paging": {
+            "limit_requested": n,
+            "limit_applied": n,
+            "offset": offset,
+            "returned": n,
+            "total": total,
+            "has_more": has_more,
+            "next_offset": offset + n if has_more else None,
+        },
+    }
+
+
+def _rows_spec(floor: int = 5) -> dict:
+    return {"path": ["rows"], "keep_fields": (), "min_items": floor, "label": "rows"}
+
+
+def test_trimmed_page_reports_the_rows_it_carries():
+    payload = _page(offset=0, n=100, total=7481)
+
+    result = bound_structured_response(
+        payload, bags=(_rows_spec(),), limit=20_000, paging=_PAGING_SPEC
+    )
+
+    kept = len(result["rows"])
+    assert 5 <= kept < 100
+    assert result[BOUNDS_KEY]["items_returned"] == kept
+    assert result["paging"]["returned"] == kept
+    assert result["paging"]["next_offset"] == kept
+    assert result["paging"]["has_more"] is True
+    assert result["paging"]["total"] == 7481  # the result set, untouched
+    assert result["paging"]["offset"] == 0
+    assert result["paging"]["limit_applied"] == 100  # what upstream was asked for
+
+
+def test_trimmed_page_cursor_is_offset_plus_kept():
+    payload = _page(offset=300, n=100, total=7481)
+
+    result = bound_structured_response(
+        payload, bags=(_rows_spec(),), limit=20_000, paging=_PAGING_SPEC
+    )
+
+    kept = len(result["rows"])
+    assert result["rows"][0]["i"] == 300  # the head of the page is what stays
+    assert result["paging"]["next_offset"] == 300 + kept
+
+
+def test_trimmed_last_page_gets_a_cursor_back():
+    """A last page has has_more false and no cursor. Once the guard drops some
+    of its rows there IS more to fetch, so both have to come back."""
+    payload = _page(offset=7400, n=81, total=7481)
+    assert payload["paging"]["has_more"] is False
+    assert payload["paging"]["next_offset"] is None
+
+    result = bound_structured_response(
+        payload, bags=(_rows_spec(),), limit=15_000, paging=_PAGING_SPEC
+    )
+
+    kept = len(result["rows"])
+    assert kept < 81
+    assert result["paging"]["has_more"] is True
+    assert result["paging"]["next_offset"] == 7400 + kept
+
+
+def test_paging_without_a_cursor_keeps_next_offset():
+    """`cursor: False` is for a tool with no offset parameter to follow: the
+    count and has_more are corrected, next_offset is not invented."""
+    payload = _page(offset=0, n=100, total=0)
+    payload["paging"].update({"total": None, "has_more": False, "next_offset": None})
+
+    result = bound_structured_response(
+        payload,
+        bags=(_rows_spec(),),
+        limit=20_000,
+        paging={"key": "paging", "path": ["rows"], "cursor": False},
+    )
+
+    kept = len(result["rows"])
+    assert result["paging"]["returned"] == kept < 100
+    assert result["paging"]["has_more"] is True
+    assert result["paging"]["next_offset"] is None
+
+
+def test_paging_untouched_when_nothing_was_dropped():
+    # Fits: identity, no marker, paging exactly as built.
+    small = _page(offset=0, n=3, total=10)
+    before = json.dumps(small)
+    assert bound_structured_response(
+        small, bags=(_rows_spec(),), limit=1_000_000, paging=_PAGING_SPEC
+    ) is small
+    assert json.dumps(small) == before
+
+    # Over budget but shed by slimming alone: every row survives, so the
+    # cursor was already right and must not move.
+    slimmable = {
+        "rows": [{"i": k, "heavy": "z" * 500} for k in range(20)],
+        "paging": {"offset": 0, "returned": 20, "total": 40, "has_more": True, "next_offset": 20},
+    }
+    result = bound_structured_response(
+        slimmable,
+        bags=({"path": ["rows"], "keep_fields": ("i",), "min_items": 5, "label": "rows"},),
+        limit=5_000,
+        paging=_PAGING_SPEC,
+    )
+    assert result[BOUNDS_KEY]["stages"] == ["slimmed"]
+    assert result["paging"] == {
+        "offset": 0, "returned": 20, "total": 40, "has_more": True, "next_offset": 20,
+    }
+
+
+def test_paging_untouched_without_a_paging_spec():
+    """Back-compat: a caller that passes no spec gets the old behaviour."""
+    payload = _page(offset=0, n=100, total=7481)
+
+    result = bound_structured_response(payload, bags=(_rows_spec(),), limit=20_000)
+
+    assert len(result["rows"]) < 100
+    assert result["paging"]["returned"] == 100
+    assert result["paging"]["next_offset"] == 100
+
+
+def _fpd_page(offset: int, limit: int, corpus: list, total: int) -> dict:
+    """A search-tool response over a synthetic corpus, shaped like
+    petitions._paging_envelope builds it."""
+    rows = corpus[offset:offset + limit]
+    has_more = offset + len(rows) < total
+    return {
+        "petitionDecisionDataBag": [dict(r) for r in rows],
+        "count": total,
+        "paging": {
+            "limit_requested": limit,
+            "limit_applied": limit,
+            "offset": offset,
+            "returned": len(rows),
+            "total": total,
+            "has_more": has_more,
+            "next_offset": offset + len(rows) if has_more else None,
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    "tool",
+    [
+        "FPD_Search_petitions_minimal",
+        "FPD_Search_petitions_balanced",
+        "FPD_Search_petitions_by_art_unit",
+        "FPD_Search_petitions_by_application",
+    ],
+)
+async def test_paging_by_next_offset_visits_every_row_exactly_once(tool, monkeypatch):
+    """Walk a result set whose every page overflows the budget, through the
+    real registrar wiring, feeding back only `paging.next_offset`."""
+    from fpd_mcp.tools import _BoundedRegistrar
+
+    monkeypatch.setenv("USPTO_MAX_RESPONSE_CHARS", "12000")
+    total = 437
+    corpus = [
+        {"petitionDecisionRecordIdentifier": f"p{k:04d}", "blob": "z" * (200 + (k % 7) * 40)}
+        for k in range(total)
+    ]
+
+    fake = _FakeMCP()
+
+    async def search(limit: int = 100, offset: int = 0):
+        return _fpd_page(offset, limit, corpus, total)
+
+    _BoundedRegistrar(fake).tool(name=tool)(search)
+    registered = fake.registered[tool]
+
+    seen: list = []
+    offset, trimmed_pages = 0, 0
+    for _ in range(total):  # a loop guard, never reached
+        pre_trim_len = min(100, total - offset)
+        page = await registered(limit=100, offset=offset)
+        rows = page["petitionDecisionDataBag"]
+        assert page["paging"]["returned"] == len(rows)
+        assert page["paging"]["offset"] == offset
+        if BOUNDS_KEY in page:
+            trimmed_pages += 1
+            # items_returned is what survived the guard; items_total is the
+            # page it was handed BEFORE trimming (ARCH-03: no longer
+            # rewritten to paging.total, which is the full result set).
+            assert page[BOUNDS_KEY]["items_returned"] == len(rows)
+            assert page[BOUNDS_KEY]["items_total"] == pre_trim_len
+            assert page["paging"]["total"] == total
+        seen.extend(r["petitionDecisionRecordIdentifier"] for r in rows)
+        if not page["paging"]["has_more"]:
+            assert page["paging"]["next_offset"] is None
+            break
+        assert page["paging"]["next_offset"] == offset + len(rows)
+        offset = page["paging"]["next_offset"]
+
+    assert trimmed_pages > 0  # the walk really did go through the guard
+    assert seen == [r["petitionDecisionRecordIdentifier"] for r in corpus]

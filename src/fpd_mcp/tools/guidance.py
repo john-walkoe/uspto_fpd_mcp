@@ -23,6 +23,7 @@ async def fpd_get_guidance(section: str = "overview") -> str:
 "Choose an extraction approach" → extraction
 📏 "Why was my response truncated / how do I page it?" → limits
 "Why did an old petition return zero results?" → coverage
+"Grant rate, dismissal rate, how many, how long" → petition_practice
 
 Available sections:
 - overview: Available sections and MCP overview (default)
@@ -37,7 +38,8 @@ Available sections:
 - ultra_context: PFW fields parameter + ultra-minimal workflows
 - extraction: Extraction-tier selection for speed and quality
 - limits: Active response-size budgets, the _bounds/_window markers, paging
-- coverage: Dataset coverage bounds (2001+ filings; 2022 is a completeness floor for decisions, not a cutoff)
+- coverage: Dataset coverage bounds (applications filed 2001 or later; every outcome, decided from the early 2000s on)
+- petition_practice: The two populations, petition statistics, what the counts can and cannot say
 
 Context Efficiency Benefits:
 - 80-95% token reduction (2-8KB per section vs 62KB total)

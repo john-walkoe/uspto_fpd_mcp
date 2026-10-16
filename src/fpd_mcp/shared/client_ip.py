@@ -11,6 +11,21 @@ is read only when the peer itself is an operator-declared proxy.
 `FPD_TRUSTED_PROXY_IPS` (comma-separated IPs or CIDRs) is empty by default,
 which reproduces the previous behavior exactly: no header is consulted and
 the peer address is used as-is.
+
+CR-02 (review 2026-09-28): a typical deployment sits behind Cloudflare ->
+cloudflared -> a reverse-proxy container -> this container, all inside one
+Docker network such as `172.18.0.0/16`, so the ASGI socket peer FPD ever sees
+is the reverse proxy's address — declaring that ONE CIDR is enough to trust
+the hop. Reading `X-Forwarded-For`'s rightmost-untrusted-hop was the only
+signal before this pass, but the reverse proxy's own forwarding can insert an
+extra local hop (e.g. the cloudflared loopback address) ahead of the real
+client, which would require separately declaring THAT hop too just to strip
+it off. `CF-Connecting-IP` does not have this problem: Cloudflare sets it at
+its edge and it survives unmodified through every hop in between, so once
+the immediate peer is trusted, `CF-Connecting-IP` alone is the real client
+address — no second CIDR needed. Prefer it; fall back to the
+rightmost-untrusted `X-Forwarded-For` hop when it is absent (self-hosters
+behind a plain nginx/Traefik reverse proxy that does not set it).
 """
 
 import ipaddress
@@ -46,27 +61,54 @@ def _in_networks(address: str, networks: List[Any]) -> bool:
     return any(parsed in network for network in networks)
 
 
+def collapse_ipv6(address: str) -> str:
+    """Collapse an IPv6 address to its /56 for rate-limit keying: a caller
+    who owns a /56 (a common residential or cloud allocation) must not be
+    able to rotate through it for a fresh bucket per address. IPv4 addresses
+    and anything that fails to parse pass through unchanged."""
+    try:
+        parsed = ipaddress.ip_address(address)
+    except ValueError:
+        return address
+    if isinstance(parsed, ipaddress.IPv6Address):
+        return str(ipaddress.ip_network(f"{parsed}/56", strict=False).network_address)
+    return address
+
+
 def resolve_client_ip(
-    peer: Optional[str], forwarded_for: Optional[str] = None
+    peer: Optional[str],
+    forwarded_for: Optional[str] = None,
+    cf_connecting_ip: Optional[str] = None,
 ) -> str:
-    """The caller's address, honoring XFF only from a declared proxy.
+    """The caller's address, honoring proxy headers only from a declared proxy.
 
     Args:
         peer: the raw ASGI peer address (`request.client.host`).
         forwarded_for: the `X-Forwarded-For` header value, if any.
+        cf_connecting_ip: the `CF-Connecting-IP` header value, if any.
 
-    Returns the peer address unless the peer is a trusted proxy AND the
-    header carries a parseable address, in which case the RIGHTMOST entry
-    that is not itself a trusted proxy is used — the last hop the trusted
-    chain actually observed, rather than the leftmost value, which the client
-    controls.
+    Returns the peer address unless the peer is a trusted proxy, in which
+    case `CF-Connecting-IP` is used when present and parseable (CR-02: it
+    survives every intermediate hop unmodified once Cloudflare sets it, so
+    trusting the one immediate-peer CIDR is sufficient), else the RIGHTMOST
+    `X-Forwarded-For` entry that is not itself a trusted proxy — the last hop
+    the trusted chain actually observed, rather than the leftmost value,
+    which the client controls. The result is collapsed to a /56 for IPv6.
     """
     peer = (peer or "").strip() or _UNKNOWN
     networks = trusted_proxy_networks()
     if not networks or not _in_networks(peer, networks):
-        return peer
+        return collapse_ipv6(peer)
+    cf_connecting_ip = (cf_connecting_ip or "").strip()
+    if cf_connecting_ip:
+        try:
+            ipaddress.ip_address(cf_connecting_ip)
+        except ValueError:
+            pass
+        else:
+            return collapse_ipv6(cf_connecting_ip)
     if not forwarded_for:
-        return peer
+        return collapse_ipv6(peer)
     candidates = [part.strip() for part in forwarded_for.split(",") if part.strip()]
     for candidate in reversed(candidates):
         if _in_networks(candidate, networks):
@@ -75,8 +117,8 @@ def resolve_client_ip(
             ipaddress.ip_address(candidate)
         except ValueError:
             continue
-        return candidate
-    return peer
+        return collapse_ipv6(candidate)
+    return collapse_ipv6(peer)
 
 
 def client_ip_from_request(request: Any) -> str:
@@ -85,4 +127,5 @@ def client_ip_from_request(request: Any) -> str:
     peer = getattr(client, "host", None) if client is not None else None
     headers = getattr(request, "headers", None)
     forwarded = headers.get("x-forwarded-for") if headers is not None else None
-    return resolve_client_ip(peer, forwarded)
+    cf_connecting_ip = headers.get("cf-connecting-ip") if headers is not None else None
+    return resolve_client_ip(peer, forwarded, cf_connecting_ip)

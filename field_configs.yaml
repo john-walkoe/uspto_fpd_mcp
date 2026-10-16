@@ -5,7 +5,14 @@
 # ---------------------------------------------------------------------------
 # PROVENANCE (how the facts in this file are known)
 # ---------------------------------------------------------------------------
-# Verified:  2026-08-21, re-probed 2026-08-30
+# Verified:  2026-08-21, re-probed 2026-08-30. The 2026-10 payload change
+#            (docs/UPSTREAM-FPD-API-CHANGE-2026-10.md, probed 2026-10-05)
+#            supersedes the corpus facts below: ~1.1 million decisions back to
+#            2001, mostly GRANTED; USPTO renamed the outcome field to
+#            decidedPetitionTypeCodeDescriptionText. The field sets keep the
+#            name decisionTypeCodeDescriptionText: the server asks USPTO for
+#            the new name and serves it under the old one
+#            (src/fpd_mcp/api/payload_compat.py).
 # Probe:     FPD_Search_petitions_minimal (this repo's client) against
 #            https://api.uspto.gov/api/v1/petition/decisions
 # Live baseline observed:
@@ -40,7 +47,7 @@ predefined_sets:
       - applicationNumberText              # Links to PFW MCP
       - patentNumber                       # Links to PTAB MCP (if granted)
       - firstApplicantName                 # Petitioner/applicant name
-      - decisionTypeCodeDescriptionText    # GRANTED/DENIED/DISMISSED
+      - decisionTypeCodeDescriptionText    # GRANTED/GRANTED-IN-PART/DENIED/DISMISSED (alias of USPTO's decidedPetitionTypeCodeDescriptionText)
       - petitionMailDate                   # When petition filed
       - decisionDate                       # When Director decided
       - finalDecidingOfficeName            # Office that decided
@@ -130,8 +137,9 @@ context_settings:
 # - groupArtUnitNumber: Links to PFW for art unit analysis
 # - firstApplicantName: Party matching across PFW and PTAB MCPs
 #
-# PETITION RED FLAGS (for quality assessment):
-# - ruleBag containing "37 CFR 1.137": Revival petitions (abandoned application)
-# - ruleBag containing "37 CFR 1.181": Petitions for supervisory review (examiner disputes)
-# - ruleBag containing "37 CFR 1.182": Petitions for reconsideration (restriction issues)
-# - decisionTypeCodeDescriptionText: "DENIED": Unsuccessful petition (potential quality issue)
+# PETITION CLASSES (2026-10-07): select by decisionPetitionTypeCode, not ruleBag.
+# ruleBag/statuteBag are populated only on the final decisions (never on
+# DISMISSED), so a ruleBag filter misses almost every decision of a class.
+# - Revival: 501, 502, 562 and related codes (FPD_list_petition_types(search='revival'))
+# - Examiner disputes: 504 (274 national stage); 515 is non-examining supervisory review
+# - DENIED is not a quality signal on its own; compare outcomes within one type only

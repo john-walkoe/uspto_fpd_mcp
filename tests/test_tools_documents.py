@@ -6,6 +6,7 @@ probe, recent-downloads registration) are stubbed out since they are separate
 concerns covered by tests/test_proxy_and_views.py.
 """
 
+from datetime import timedelta
 from unittest.mock import AsyncMock
 
 import fpd_mcp.proxy.centralized_integration as centralized_integration
@@ -47,8 +48,14 @@ def _petition_with_document():
 
 
 class _FakeLinkCache:
+    cache_duration = timedelta(days=1)
+    max_uses = 25
+
     def generate_persistent_link(self, **kwargs):
         return "http://localhost:8081/download/persistent/fakehash"
+
+    async def mint_persistent_link(self, **kwargs):
+        return self.generate_persistent_link(**kwargs)
 
 
 async def test_get_document_download_success(mock_runtime, monkeypatch):
@@ -131,6 +138,34 @@ async def test_get_document_content_returns_expected_keys(mock_runtime):
     assert kwargs["auto_optimize"] is True
 
 
+async def test_get_document_content_carries_cite_as_and_the_quoting_rule(mock_runtime):
+    # A claude.ai run linked the wrong application and "fixed" the Office's
+    # wording in a quoted decision (2026-10-07): the response now hands back
+    # the verified link and says to quote exactly.
+    mock_runtime.api_client.extract_document_content_hybrid.return_value = {
+        "success": True,
+        "document_code": "PETDEC",
+        "page_count": 4,
+        "extracted_content": "The petition under 37 CFR 1.137(a) is DISMISSED.",
+        "extraction_method": "docx variant",
+        "application_number": "16724244",
+        "patent_number": None,
+        "decision_date": "2026-10-02",
+    }
+
+    result = await fpd_get_document_content(
+        petition_id=_PETITION_ID, document_identifier=_DOCUMENT_ID
+    )
+
+    assert result["cite_as"] == (
+        "[Petition decision 2026-10-02, application 16/724,244]"
+        "(https://patentcenter.uspto.gov/applications/16724244)"
+    )
+    assert "never correct" in result["quoting_rule"]
+    assert "patent_number" not in result and "decision_date" not in result
+    assert result["application_number"] == "16724244"
+
+
 def _long_ocr_result(pages: int = 40, page_chars: int = 4_000):
     text = "\n\n".join(
         f"=== PAGE {i} ===\n" + ("word " * (page_chars // 5)) for i in range(1, pages + 1)
@@ -154,7 +189,11 @@ async def test_get_document_content_windows_long_text_with_a_cursor(mock_runtime
     )
 
     window = result["_window"]
-    assert window["unit"] == "page"  # snapped to `=== PAGE N ===` boundaries
+    # CR-D (review 2026-09-28): re-vendored from PTAB — `edges` records the
+    # `=== PAGE N ===` snapping; `unit` names the counters and is always
+    # "char".
+    assert window["edges"] == "page"
+    assert window["unit"] == "char"
     assert window["offset"] == 0
     assert window["total"] == len(full_text)
     assert window["has_more"] is True
@@ -248,7 +287,11 @@ async def test_content_extraction_has_an_overall_deadline(mock_runtime, monkeypa
 
     from fpd_mcp.tools import documents as documents_module
 
-    monkeypatch.setenv("FPD_TOOL_DEADLINE_SECONDS", "1")
+    # Re-pinned 2026-10-06 (Wave 2 A.5): the budget is now
+    # FPD_CONTENT_DEADLINE_SECONDS (util/deadline.py, default 85, was
+    # FPD_TOOL_DEADLINE_SECONDS=150) and the envelope leads with
+    # "Deadline exceeded"; the 408 and the recovery text are unchanged.
+    monkeypatch.setenv("FPD_CONTENT_DEADLINE_SECONDS", "1")
 
     async def never_returns(*args, **kwargs):
         await asyncio.sleep(30)
@@ -261,18 +304,71 @@ async def test_content_extraction_has_an_overall_deadline(mock_runtime, monkeypa
     )
 
     assert result["status_code"] == 408
+    assert result["error"].startswith("Deadline exceeded")
     assert "time budget" in result["error"]
     assert "FPD_get_document_download" in result["error"]
 
 
 def test_an_unparseable_deadline_falls_back_to_the_default(monkeypatch):
-    from fpd_mcp.tools.documents import (
-        _DEFAULT_TOOL_DEADLINE_SECONDS,
-        _tool_deadline_seconds,
+    # Re-pinned 2026-10-06 (Wave 2 A.5): the parser moved to util/deadline.py
+    # under the new variable name.
+    from fpd_mcp.util.deadline import (
+        DEFAULT_CONTENT_DEADLINE_SECONDS,
+        content_deadline_seconds,
     )
 
-    monkeypatch.setenv("FPD_TOOL_DEADLINE_SECONDS", "soon")
-    assert _tool_deadline_seconds() == _DEFAULT_TOOL_DEADLINE_SECONDS
+    monkeypatch.setenv("FPD_CONTENT_DEADLINE_SECONDS", "soon")
+    assert content_deadline_seconds() == DEFAULT_CONTENT_DEADLINE_SECONDS
 
-    monkeypatch.setenv("FPD_TOOL_DEADLINE_SECONDS", "30")
-    assert _tool_deadline_seconds() == 30.0
+    monkeypatch.setenv("FPD_CONTENT_DEADLINE_SECONDS", "30")
+    assert content_deadline_seconds() == 30.0
+
+
+async def test_a_caller_proxy_port_never_chooses_the_bind_port(mock_runtime, monkeypatch):
+    """S4 (2026-10-12 audit): proxy_port used to decide which loopback port
+    the server bound and which port the link named. It is now ignored, and
+    the response says so."""
+    mock_runtime.api_client.get_petition_by_id.return_value = _petition_with_document()
+    ensure = AsyncMock()
+    minted = {}
+
+    class _RecordingLinkCache(_FakeLinkCache):
+        async def mint_persistent_link(self, **kwargs):
+            minted.update(kwargs)
+            return self.generate_persistent_link(**kwargs)
+
+    monkeypatch.delenv("FPD_PROXY_BASE_URL", raising=False)
+    monkeypatch.setenv("FPD_PROXY_PORT", "8081")
+    monkeypatch.setattr(centralized_integration, "get_centralized_base_url", lambda: None)
+    monkeypatch.setattr(secure_link_cache, "get_link_cache", lambda: _RecordingLinkCache())
+    monkeypatch.setattr(documents_module, "_ensure_proxy_server_running", ensure)
+    monkeypatch.setattr(
+        documents_module, "_register_download_via_proxy", AsyncMock(return_value=None)
+    )
+
+    result = await fpd_get_document_download(
+        petition_id=_PETITION_ID, document_identifier=_DOCUMENT_ID, proxy_port=5001
+    )
+
+    assert result["success"] is True
+    ensure.assert_awaited_once_with(8081)
+    assert minted["base_url"] == "http://localhost:8081"
+    assert "5001" in result["proxy_port_note"] and "ignored" in result["proxy_port_note"]
+
+
+async def test_the_configured_proxy_port_needs_no_note(mock_runtime, monkeypatch):
+    mock_runtime.api_client.get_petition_by_id.return_value = _petition_with_document()
+    monkeypatch.setenv("FPD_PROXY_PORT", "8081")
+    monkeypatch.setattr(centralized_integration, "get_centralized_base_url", lambda: None)
+    monkeypatch.setattr(secure_link_cache, "get_link_cache", lambda: _FakeLinkCache())
+    monkeypatch.setattr(documents_module, "_ensure_proxy_server_running", AsyncMock())
+    monkeypatch.setattr(
+        documents_module, "_register_download_via_proxy", AsyncMock(return_value=None)
+    )
+
+    result = await fpd_get_document_download(
+        petition_id=_PETITION_ID, document_identifier=_DOCUMENT_ID, proxy_port=8081
+    )
+
+    assert result["success"] is True
+    assert "proxy_port_note" not in result

@@ -2,7 +2,9 @@
 Secure SQLite persistent link cache for FPD petition document downloads.
 
 Provides encrypted persistent download links that remain valid for a
-configurable duration (default 7 days) while keeping all sensitive data
+configurable duration (FPD_LINK_TTL_DAYS, default 1 day, never less than 1)
+and a configurable number of downloads (FPD_LINK_MAX_USES, default 25, the
+same ceiling as PFW_LINK_MAX_USES) while keeping all sensitive data
 encrypted. The opaque link hash in the URL is the sole credential —
 browser navigation needs no headers (Lesson 43).
 
@@ -13,6 +15,12 @@ Adapted from the PTAB/PFW reference implementation with FPD differences:
 - Own database file and encryption key, never shared with PTAB/PFW caches.
 - DPAPI entropy is real bytes (the PTAB/PFW copies passed an int constant,
   which made the DPAPI path fail silently and fall back to the file key).
+
+Key resolution (per server): DPAPI-protected file on Windows, else a plain
+0600 file, `.fpd_proxy_encryption_key`, read from the project root when a
+pre-2026-08 key already lives there, else from the data dir
+(`_default_data_dir`: FPD_LINK_CACHE_DIR, else beside FPD_AUTH_DB_PATH, else
+the project root); generated on first use. There is no env-managed key.
 
 TODO(architectural): the Fernet key falls back to a plain file on Linux.
 DPAPI is Windows-only; any user with filesystem read access can recover
@@ -26,7 +34,7 @@ import secrets
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Iterator, Optional
+from typing import Any, Dict, Iterator, Optional, Tuple
 
 from cryptography.fernet import Fernet
 
@@ -45,6 +53,70 @@ _DPAPI_ENTROPY = hashlib.sha256(b"fpd_mcp.proxy.secure_link_cache.v1").digest()
 
 _PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 
+#: Default persistent-link lifetime in days (FPD_LINK_TTL_DAYS): one day,
+#: the same as PFW_LINK_TTL_DAYS, so every document server's link lives a day.
+_DEFAULT_LINK_TTL_DAYS = 1
+
+#: Default per-link download ceiling (FPD_LINK_MAX_USES), PFW's shape and
+#: PFW's default (PFW_LINK_MAX_USES=25). 0 or below disables the ceiling.
+_DEFAULT_LINK_MAX_USES = 25
+
+
+def link_ttl_days() -> int:
+    """Persistent-link lifetime in days: FPD_LINK_TTL_DAYS, at least 1."""
+    try:
+        return max(1, int(os.getenv("FPD_LINK_TTL_DAYS", str(_DEFAULT_LINK_TTL_DAYS))))
+    except ValueError:
+        logger.warning(f"Invalid FPD_LINK_TTL_DAYS, using {_DEFAULT_LINK_TTL_DAYS}")
+        return _DEFAULT_LINK_TTL_DAYS
+
+
+def link_max_uses() -> int:
+    """Downloads one link allows: FPD_LINK_MAX_USES (0 or below: no ceiling)."""
+    try:
+        return int(os.getenv("FPD_LINK_MAX_USES", str(_DEFAULT_LINK_MAX_USES)))
+    except ValueError:
+        logger.warning(f"Invalid FPD_LINK_MAX_USES, using {_DEFAULT_LINK_MAX_USES}")
+        return _DEFAULT_LINK_MAX_USES
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}" if n == 1 else f"{n} {word}s"
+
+
+def link_lifetime_text(ttl_days: Optional[int] = None,
+                       max_uses: Optional[int] = None) -> str:
+    """'1 day, up to 25 downloads': the local link lifetime as served text,
+    built from the live settings so no message hard-codes a number."""
+    days = link_ttl_days() if ttl_days is None else ttl_days
+    uses = link_max_uses() if max_uses is None else max_uses
+    text = _plural(days, "day")
+    if uses > 0:
+        text += f", up to {_plural(uses, 'download')}"
+    return text
+
+
+#: Stands in a served HTML page wherever the link lifetime is stated; the
+#: serving route swaps in `link_lifetime_text()` so the page reads the setting.
+LINK_LIFETIME_PLACEHOLDER = "__LINK_LIFETIME__"
+
+
+def render_link_lifetime(html: str) -> str:
+    """`html` with the lifetime placeholder replaced by the live setting."""
+    return html.replace(LINK_LIFETIME_PLACEHOLDER, link_lifetime_text())
+
+
+#: What a link minted by the PFW centralized proxy lives for. PFW owns that
+#: lifetime (PFW_LINK_TTL_DAYS / PFW_LINK_MAX_USES on the PFW server), not
+#: this server; the numbers are PFW's code defaults.
+#: PFW's code default for PFW_LINK_TTL_DAYS, reported as `expires_in_days` for
+#: a centralized link (this server cannot read the PFW server's env).
+CENTRALIZED_LINK_TTL_DAYS = 1
+CENTRALIZED_LINK_LIFETIME_TEXT = (
+    "set by the PFW centralized proxy (PFW_LINK_TTL_DAYS / PFW_LINK_MAX_USES, "
+    "1 day / 25 downloads by default)"
+)
+
 
 def _default_data_dir() -> Path:
     """Writable home for the link-cache db and encryption key.
@@ -54,7 +126,7 @@ def _default_data_dir() -> Path:
     Docker deployments) → project root (bare stdio installs). Each candidate
     is write-probed; the last resort is the system temp dir, so an
     unwritable install degrades to session-lived links instead of a 500 on
-    every download (h3 staging 2026-08-16: /app is root-owned under the
+    every download (staging 2026-08-16: /app is root-owned under the
     uid-1000 runtime and SecureLinkCache() died on the sqlite connect,
     failing FPD_get_document_download outright).
     """
@@ -96,13 +168,22 @@ class SecureLinkCache:
     Features:
     - Encrypted storage of petition identifiers, document IDs and download URLs
     - Opaque URLs that don't reveal business data
-    - Configurable link expiration (default 7 days)
+    - Configurable link expiration (default 1 day, FPD_LINK_TTL_DAYS, as PFW)
+    - Per-link download ceiling (default 25, FPD_LINK_MAX_USES)
     - Automatic cleanup of expired links
     - Windows DPAPI protection for the encryption key, file fallback elsewhere
     """
 
-    def __init__(self, cache_duration_days: int = 7, db_path: Optional[str] = None):
+    def __init__(self, cache_duration_days: Optional[int] = None,
+                 db_path: Optional[str] = None,
+                 max_uses: Optional[int] = None):
+        # FPD_LINK_TTL_DAYS / FPD_LINK_MAX_USES, PFW's two bounds: a link is
+        # an unrevocable capability that delegates this server's ODP key for
+        # one document. Read per instance so a deployment's env applies.
+        if cache_duration_days is None:
+            cache_duration_days = link_ttl_days()
         self.cache_duration = timedelta(days=cache_duration_days)
+        self.max_uses = link_max_uses() if max_uses is None else max_uses
 
         if db_path:
             self.db_path = db_path
@@ -113,6 +194,19 @@ class SecureLinkCache:
         self.cipher = Fernet(self.encryption_key)
         self._init_database()
 
+    @staticmethod
+    def _key_file() -> Path:
+        """Where this server's own Fernet key lives.
+
+        Prefer a legacy project-root key when one already exists (pre-2026-08
+        installs stored it there; moving away from it would orphan every
+        previously issued persistent link), else live beside the db.
+        """
+        legacy_key = _PROJECT_ROOT / _KEY_FILE_NAME
+        if legacy_key.exists():
+            return legacy_key
+        return _default_data_dir() / _KEY_FILE_NAME
+
     def _get_or_create_encryption_key(self) -> bytes:
         """
         Get the Fernet key from DPAPI-protected storage or create a new one.
@@ -121,14 +215,7 @@ class SecureLinkCache:
         per-machine). On non-Windows the raw key is stored with restrictive
         file permissions (0o600).
         """
-        # Prefer a legacy project-root key when one already exists (pre-2026-08
-        # installs stored it there; moving away from it would orphan every
-        # previously issued persistent link), else live beside the db.
-        legacy_key = _PROJECT_ROOT / _KEY_FILE_NAME
-        if legacy_key.exists():
-            key_file = legacy_key
-        else:
-            key_file = _default_data_dir() / _KEY_FILE_NAME
+        key_file = self._key_file()
 
         try:
             from ..shared.dpapi_crypto import (
@@ -155,22 +242,36 @@ class SecureLinkCache:
         return self._get_file_based_key(key_file)
 
     def _get_file_based_key(self, key_file: Path) -> bytes:
-        """Fallback plain-file key storage for non-Windows systems."""
+        """Fallback plain-file key storage for non-Windows systems.
+
+        A key we cannot READ is not a key we may replace (the PTAB fix of the
+        same bug). Generating a new one on a read failure (permissions
+        changed, container UID mismatch) and writing it over the old file made
+        every row in download_links undecryptable, and resolve_persistent_link
+        then DELETED each one as it failed: links that worked a minute earlier
+        answered "not found or expired". Let the OSError out instead.
+        """
         if key_file.exists():
-            try:
-                return key_file.read_bytes()
-            except Exception as e:
-                logger.warning(f"Error reading encryption key file: {e}, generating new key")
+            return key_file.read_bytes()
 
         # SECURITY NOTE: on Linux/macOS the Fernet key is protected only by
         # filesystem permissions (0o600) — same accepted limitation as PFW.
         key = Fernet.generate_key()
         try:
-            key_file.write_bytes(key)
-            os.chmod(key_file, 0o600)
+            # Created with the mode already set (no write-then-chmod window),
+            # and never over an existing file.
+            fd = os.open(key_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                os.write(fd, key)
+            finally:
+                os.close(fd)
             logger.info("Generated new file-based proxy encryption key")
         except Exception as e:
-            logger.warning(f"Could not save encryption key to file: {e}")
+            # Links minted this process lifetime will not survive a restart.
+            logger.error(
+                f"Could not save the proxy encryption key ({type(e).__name__}); "
+                "persistent links minted now will stop working at the next restart"
+            )
 
         return key
 
@@ -207,6 +308,46 @@ class SecureLinkCache:
             logger.error(f"Failed to initialize link cache database: {e}")
             raise
 
+    def _encrypt_token(
+        self,
+        petition_id: str,
+        document_identifier: str,
+        file_download_uri: str,
+        enhanced_filename: str,
+    ) -> Tuple[str, str]:
+        """(encrypted_token, link_hash) for one document reference."""
+        token_data = json.dumps({
+            'petition_id': petition_id,
+            'document_identifier': document_identifier,
+            'file_download_uri': file_download_uri,
+            'enhanced_filename': enhanced_filename,
+            'timestamp': datetime.now().isoformat(),
+            # Random component prevents pattern analysis of equal payloads
+            'random': secrets.token_hex(16),
+        })
+
+        encrypted_token = self.cipher.encrypt(token_data.encode('utf-8')).decode('utf-8')
+
+        # Irreversible hash for database lookup — 24 hex chars (~96 bits)
+        link_hash = hashlib.sha256(encrypted_token.encode('utf-8')).hexdigest()[:24]
+        return encrypted_token, link_hash
+
+    def _store_local(self, link_hash: str, encrypted_token: str) -> datetime:
+        """Write one link to this server's SQLite registry; its expiry."""
+        expires_at = datetime.now() + self.cache_duration
+        with self._connection() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO download_links
+                (link_hash, encrypted_token, created_at, last_accessed, access_count, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (link_hash, encrypted_token, datetime.now(), datetime.now(), 0, expires_at))
+            conn.commit()
+        return expires_at
+
+    @staticmethod
+    def _link_url(base_url: str, link_hash: str) -> str:
+        return f"{base_url.rstrip('/')}/download/persistent/{link_hash}"
+
     def generate_persistent_link(
         self,
         petition_id: str,
@@ -229,42 +370,34 @@ class SecureLinkCache:
             Opaque persistent download URL
         """
         try:
-            token_data = json.dumps({
-                'petition_id': petition_id,
-                'document_identifier': document_identifier,
-                'file_download_uri': file_download_uri,
-                'enhanced_filename': enhanced_filename,
-                'timestamp': datetime.now().isoformat(),
-                # Random component prevents pattern analysis of equal payloads
-                'random': secrets.token_hex(16),
-            })
-
-            encrypted_token = self.cipher.encrypt(token_data.encode('utf-8')).decode('utf-8')
-
-            # Irreversible hash for database lookup — 24 hex chars (~96 bits)
-            link_hash = hashlib.sha256(encrypted_token.encode('utf-8')).hexdigest()[:24]
-
-            expires_at = datetime.now() + self.cache_duration
-
-            with self._connection() as conn:
-                conn.execute("""
-                    INSERT OR REPLACE INTO download_links
-                    (link_hash, encrypted_token, created_at, last_accessed, access_count, expires_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (link_hash, encrypted_token, datetime.now(), datetime.now(), 0, expires_at))
-                conn.commit()
-
-            persistent_url = f"{base_url.rstrip('/')}/download/persistent/{link_hash}"
+            encrypted_token, link_hash = self._encrypt_token(
+                petition_id, document_identifier, file_download_uri, enhanced_filename
+            )
+            expires_at = self._store_local(link_hash, encrypted_token)
             # Truncated hash only — the full hash is the credential (Lesson 43)
             logger.info(
                 f"Generated persistent link {link_hash[:8]}... for petition "
                 f"{petition_id}, expires {expires_at}"
             )
-            return persistent_url
+            return self._link_url(base_url, link_hash)
 
         except Exception as e:
             logger.error(f"Failed to generate persistent link: {e}")
             raise
+
+    async def mint_persistent_link(
+        self,
+        petition_id: str,
+        document_identifier: str,
+        file_download_uri: str,
+        enhanced_filename: str,
+        base_url: str = "http://localhost:8081",
+    ) -> str:
+        """Async form of `generate_persistent_link` for the tool path."""
+        return self.generate_persistent_link(
+            petition_id, document_identifier, file_download_uri,
+            enhanced_filename, base_url,
+        )
 
     def resolve_persistent_link(self, link_hash: str) -> Optional[Dict[str, Any]]:
         """
@@ -280,35 +413,47 @@ class SecureLinkCache:
                 answers and used to be indistinguishable (F-X1).
         """
         try:
+            # S5 (2026-10-12 audit, July L21): check and count in ONE
+            # statement. The row is counted and returned only while it is
+            # live and under the ceiling, so parallel downloads cannot all
+            # pass a read-then-update check of FPD_LINK_MAX_USES.
+            now = datetime.now()
+            live = None
             with self._connection() as conn:
                 cursor = conn.execute("""
-                    SELECT encrypted_token, created_at, access_count, expires_at
-                    FROM download_links
-                    WHERE link_hash = ? AND expires_at > ?
-                """, (link_hash, datetime.now()))
+                    UPDATE download_links
+                    SET last_accessed = ?, access_count = access_count + 1
+                    WHERE link_hash = ? AND expires_at > ? AND (? <= 0 OR access_count < ?)
+                    RETURNING encrypted_token, created_at, access_count, expires_at
+                """, (now, link_hash, now, self.max_uses, self.max_uses))
                 result = cursor.fetchone()
+                conn.commit()
+                if not result:
+                    live = conn.execute(
+                        "SELECT access_count FROM download_links"
+                        " WHERE link_hash = ? AND expires_at > ?",
+                        (link_hash, now),
+                    ).fetchone()
 
             if not result:
-                logger.warning(f"Persistent link {link_hash[:8]}... not found or expired")
+                if live is not None and self._exhausted(live[0]):
+                    logger.warning(
+                        f"Persistent link {link_hash[:8]}... exhausted its use "
+                        f"ceiling ({live[0]}/{self.max_uses}); removing"
+                    )
+                    self._remove_link(link_hash)
+                else:
+                    logger.warning(f"Persistent link {link_hash[:8]}... not found or expired")
                 return None
 
-            encrypted_token, created_at, access_count, expires_at = result
+            encrypted_token, created_at, counted, expires_at = result
+            access_count = counted - 1  # the count before this download
 
             try:
                 decrypted = self.cipher.decrypt(encrypted_token.encode('utf-8')).decode('utf-8')
                 token_data = json.loads(decrypted)
 
-                self._update_access(link_hash)
-
-                return {
-                    'petition_id': token_data['petition_id'],
-                    'document_identifier': token_data['document_identifier'],
-                    'file_download_uri': token_data.get('file_download_uri'),
-                    'enhanced_filename': token_data.get('enhanced_filename'),
-                    'created_at': created_at,
-                    'access_count': access_count + 1,
-                    'expires_at': expires_at,
-                }
+                return self._resolved(token_data, created_at, access_count, expires_at)
             except Exception as decrypt_error:
                 logger.error(f"Failed to decrypt token for link {link_hash[:8]}...: {type(decrypt_error).__name__}")
                 self._remove_link(link_hash)
@@ -325,6 +470,27 @@ class SecureLinkCache:
                 f"{type(e).__name__}"
             )
             raise LinkCacheUnavailable(str(e)) from e
+
+    async def resolve_persistent_link_async(self, link_hash: str) -> Optional[Dict[str, Any]]:
+        """Async form of `resolve_persistent_link` for the download route."""
+        return self.resolve_persistent_link(link_hash)
+
+    def _exhausted(self, access_count: int) -> bool:
+        """True when a link has used up its download ceiling."""
+        return self.max_uses > 0 and access_count >= self.max_uses
+
+    @staticmethod
+    def _resolved(token_data: Dict[str, Any], created_at: Any, access_count: int,
+                  expires_at: Any) -> Dict[str, Any]:
+        return {
+            'petition_id': token_data['petition_id'],
+            'document_identifier': token_data['document_identifier'],
+            'file_download_uri': token_data.get('file_download_uri'),
+            'enhanced_filename': token_data.get('enhanced_filename'),
+            'created_at': created_at,
+            'access_count': access_count + 1,
+            'expires_at': expires_at,
+        }
 
     def _update_access(self, link_hash: str):
         """Update access tracking for a link."""

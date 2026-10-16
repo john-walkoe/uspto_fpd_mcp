@@ -67,6 +67,62 @@ def test_a_malformed_trusted_proxy_entry_never_matches(monkeypatch):
     assert resolve_client_ip("172.18.0.2", "203.0.113.9") == "172.18.0.2"
 
 
+# -------------------------------------------------------------------- CR-02
+
+
+def test_cf_connecting_ip_is_honored_from_a_trusted_peer(monkeypatch):
+    """A single trusted-proxy CIDR (the immediate peer) is enough for
+    CF-Connecting-IP: it survives every intermediate hop unmodified, unlike
+    X-Forwarded-For, which can need a second declared hop just to strip."""
+    monkeypatch.setenv("FPD_TRUSTED_PROXY_IPS", "172.18.0.0/16")
+
+    resolved = resolve_client_ip(
+        "172.18.0.4", "9.9.9.9, 172.18.0.1", "203.0.113.9"
+    )
+
+    assert resolved == "203.0.113.9"
+
+
+def test_cf_connecting_ip_is_ignored_from_an_untrusted_peer(monkeypatch):
+    monkeypatch.setenv("FPD_TRUSTED_PROXY_IPS", "172.18.0.0/16")
+
+    assert resolve_client_ip("203.0.113.50", None, "1.2.3.4") == "203.0.113.50"
+
+
+def test_forwarded_for_is_still_the_fallback_when_cf_header_is_absent(
+    monkeypatch,
+):
+    monkeypatch.setenv("FPD_TRUSTED_PROXY_IPS", "172.18.0.0/16")
+
+    resolved = resolve_client_ip("172.18.0.4", "203.0.113.9", None)
+
+    assert resolved == "203.0.113.9"
+
+
+def test_a_malformed_cf_connecting_ip_falls_back_to_forwarded_for(monkeypatch):
+    monkeypatch.setenv("FPD_TRUSTED_PROXY_IPS", "172.18.0.0/16")
+
+    resolved = resolve_client_ip("172.18.0.4", "203.0.113.9", "not-an-ip")
+
+    assert resolved == "203.0.113.9"
+
+
+def test_ipv6_client_keys_collapse_to_their_slash_56(monkeypatch):
+    monkeypatch.setenv("FPD_TRUSTED_PROXY_IPS", "172.18.0.0/16")
+
+    resolved = resolve_client_ip(
+        "172.18.0.4", None, "2001:db8:1234:5678::1"
+    )
+
+    assert resolved == "2001:db8:1234:5600::"
+
+
+def test_ipv6_peer_collapses_with_no_proxy_declared(monkeypatch):
+    monkeypatch.delenv("FPD_TRUSTED_PROXY_IPS", raising=False)
+
+    assert resolve_client_ip("2001:db8:1234:5678::1") == "2001:db8:1234:5600::"
+
+
 # --------------------------------------------------------------------- M-5
 
 

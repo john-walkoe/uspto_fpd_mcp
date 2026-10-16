@@ -44,11 +44,26 @@ export USPTO_API_KEY=your_api_key_here
 
 **Development Environment:**
 
-⚠️ **IMPORTANT:** This MCP does NOT use `.env` files for security reasons. All API keys should be set via:
-1. **Claude Desktop MCP Config** (production/normal use)
-2. **OS Environment Variables** (manual testing/development)
+⚠️ **IMPORTANT (corrected 2026-09-28, ARCH-02):** this MCP DOES load a
+`.env` — `env_bootstrap.load_repo_env()` reads this repo's own `.env` (or
+`FPD_ENV_FILE` if set) exactly once, as the first statement in every entry
+point (`main.py`, `server_app.py`), before any code reads settings. It
+never walks above the repo the way a bare `load_dotenv()` would, and an
+already-exported OS environment variable always wins (`override=False`).
+This corrects an earlier version of this section, which claimed `.env` was
+never loaded — see SSO_SETUP.md, which has always instructed OAuth
+deployments to set secrets there. `.env` is still gitignored and MUST
+never be committed. In order of what actually takes effect:
+1. **OS / Docker environment variables** (`environment:`/`env_file:` in
+   compose, or the parent shell) — set before the process starts, so these
+   win over `.env` for the same key.
+2. **This repo's own `.env`** (or `FPD_ENV_FILE`) — for local/stdio dev
+   and self-hosted deployments; never committed.
+3. **Claude Desktop MCP Config** `env` block — for a stdio client that
+   sets vars per-launch rather than via a `.env` file.
 
-A `.env.example` file is provided as a **reference template only** - it is NOT loaded by the code.
+A `.env.example` file is provided as a reference template for what `.env`
+can contain.
 
 ```bash
 # For manual testing, set OS environment variables:
@@ -644,14 +659,19 @@ Before each release:
 
 ### 🔒 **Download Proxy Network Trust Model**
 
-The local download proxy's IP allowlist and download-rate-limiter are
-**loopback-only by design**: they key on the raw ASGI peer address
-(`request.client.host`) and deliberately do **not** trust `X-Forwarded-For`
-or any other client-supplied header, since there is no trusted reverse
-proxy in front of this service by default. If you ever front the proxy
-with a real reverse proxy, add that proxy's own address to
-`PROXY_ALLOWED_IPS` and parse its XFF header explicitly there — do not
-make the proxy trust XFF from arbitrary callers.
+The download proxy's IP allowlist and every rate limiter key on the raw
+ASGI peer address (`request.client.host`) by default and do **not** trust
+`CF-Connecting-IP` or `X-Forwarded-For` — there is no trusted reverse proxy
+in front of this service unless you declare one. If you front the proxy
+with a real reverse proxy (for example a Cloudflare tunnel in front of a
+reverse-proxy container), set
+`FPD_TRUSTED_PROXY_IPS` (comma-separated IPs/CIDRs) to that proxy's own
+address; only then is `CF-Connecting-IP` (preferred) or the rightmost
+non-proxy `X-Forwarded-For` hop honored, and only from that declared peer.
+One CIDR covering the immediate peer is enough — see `.env.example`'s
+"Reverse-proxy trust" section for why a second, intermediate-hop CIDR is
+not needed. Never make the proxy trust either header from an undeclared
+peer.
 
 ### 📝 **Documentation Security**
 

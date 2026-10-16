@@ -21,6 +21,7 @@ only works if the constant and the code reading it live in the same module.
 
 import asyncio
 import os
+import random
 import threading
 from datetime import datetime, timezone
 from io import BytesIO
@@ -30,10 +31,19 @@ import httpx
 
 from ..api.docling_client import DoclingClient
 from ..api.field_constants import FPDFields
+from ..api.free_text_variants import (
+    VariantEmptyError,
+    VariantMismatchError,
+    classify_download_options,
+    extract_docx,
+    extract_xmlarchive,
+)
+from ..api.payload_compat import select_pdf_download
 from ..config import api_constants
 from ..config.feature_flags import feature_flags
 from ..shared.circuit_breaker import CircuitBreaker
 from ..shared.error_utils import (
+    RateLimitedError,
     document_not_located_response,
     format_error_response,
     generate_request_id,
@@ -41,8 +51,33 @@ from ..shared.error_utils import (
 from ..shared.response_bounds import BOUNDS_KEY as _BOUNDS_KEY
 from ..shared.response_bounds import content_char_budget as _content_char_budget
 from ..shared.unified_logging import get_logger
+from ..util.deadline import (
+    DeadlineExceeded,
+    deadline_exceeded_response,
+    room_for,
+    run_within_deadline,
+)
 
 logger = get_logger(__name__)
+
+#: S60: the one text a caller sees for any OCR or Docling provider failure
+#: (key, billing, provider error, timeout). The detail is logged server-side.
+EXTRACTION_UNAVAILABLE_MESSAGE = (
+    "Document extraction temporarily unavailable; try again later."
+)
+
+
+def mistral_ocr_model() -> str:
+    """MISTRAL_OCR_MODEL. Default `mistral-ocr-latest` tracks Mistral's
+    current GA model (= OCR 4 as of 2026-06-23); pin a dated slug (e.g.
+    mistral-ocr-2503, mistral-ocr-4-0) to fix it."""
+    return os.getenv("MISTRAL_OCR_MODEL", "mistral-ocr-latest")
+
+
+
+#: Below this many seconds left in the call's budget the Docling tier is not
+#: started: EasyOCR cannot finish a page in less (PTAB's value).
+_DOCLING_MIN_SECONDS = 5.0
 
 # M3: cumulative daily spend ceiling for billed Mistral OCR calls. State is
 # process-local (module-level) — fine for this single-container deployment;
@@ -322,6 +357,73 @@ class DocumentExtractionService:
         """
         return self._client._download_pdf_for_extraction
 
+    @property
+    def _download_variant(self) -> Callable:
+        """Capability 3: the same capped fetch for a free-text variant
+        (.docx / xmlarchive), without the PDF magic-byte check."""
+        return self._client._download_variant_for_extraction
+
+    async def _apply_free_text_tier(
+        self, extraction_result: Dict[str, Any], doc_info: Dict[str, Any],
+        document_identifier: str, request_id: str, progress_cb,
+    ) -> bool:
+        """Run tier 0 into ``extraction_result``; True when it produced the text."""
+        update, attempts = await self._try_free_text_variants(
+            doc_info["document"], doc_info["application_number"],
+            document_identifier, request_id, progress_cb,
+        )
+        if attempts:
+            extraction_result["free_text_variants"] = attempts
+        if update is None:
+            return False
+        await progress_cb(95, "Text read from the Word/XML version")
+        extraction_result.update(update)
+        return True
+
+    async def _try_free_text_variants(
+        self, document: Dict[str, Any], app_number: Optional[str],
+        document_identifier: str, request_id: str, progress_cb,
+    ) -> Tuple[Optional[Dict[str, Any]], list]:
+        """Tier 0 (auto_optimize only): the Word (.docx) and XML (xmlarchive)
+        versions USPTO serves beside the PDF of an Office-authored paper such
+        as a petition decision. Exact text, no PDF download, no OCR. Returns
+        (result-update or None, attempts); the attempts list is surfaced as
+        ``free_text_variants``. A spent call deadline propagates; any other
+        failure of a variant falls through to the next one, then to the PDF
+        tiers. The application-number check (free_text_variants module)
+        rejects a variant that names another application."""
+        attempts: list = []
+        buckets = classify_download_options(document.get("downloadOptionBag") or [])
+        plan = (("docx", buckets["docx"], extract_docx),
+                ("xmlarchive", buckets["xmlarchive"], extract_xmlarchive))
+        for label, options, parse in plan:
+            for option in options:
+                await progress_cb(15, f"Reading the {label} version...")
+                try:
+                    data = await self._download_variant(option.get("downloadUrl"))
+                    parsed = parse(data, app_number or "")
+                except DeadlineExceeded:
+                    raise
+                except VariantMismatchError as e:
+                    logger.warning(f"[{request_id}] {label} variant rejected for {document_identifier}")
+                    attempts.append({"variant": label, "outcome": "rejected", "reason": str(e)})
+                except VariantEmptyError as e:
+                    attempts.append({"variant": label, "outcome": "no text", "reason": str(e)})
+                except Exception as e:
+                    logger.warning(f"[{request_id}] {label} variant failed for {document_identifier}: {type(e).__name__}")
+                    attempts.append({"variant": label, "outcome": "failed", "reason": type(e).__name__})
+                else:
+                    attempts.append({"variant": label, "outcome": "used"})
+                    method = parsed["extraction_method"]
+                    return {
+                        "extracted_content": parsed["text"],
+                        "extraction_method": method,
+                        "auto_optimization": f"{method} served by the USPTO API - PDF not downloaded, no OCR needed",
+                        "file_size_bytes": len(data),
+                        "application_number_verified": parsed["application_number_verified"],
+                    }, attempts
+        return None, attempts
+
     def is_good_extraction(self, text: str) -> bool:
         """
         Determine if pypdf extraction is usable or if we need Mistral OCR.
@@ -422,6 +524,62 @@ class DocumentExtractionService:
             text_parts.append(page.extract_text())
         return truncated
 
+    # -- Mistral requests: bounded retries inside the call's time budget ----
+
+    #: Transient Mistral statuses worth another attempt (Wave 2 A.4, PTAB's).
+    _MISTRAL_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+    _MISTRAL_RETRY_ATTEMPTS = 3
+
+    async def _post_with_retry(self, client: httpx.AsyncClient, url: str, **kwargs):
+        """POST to Mistral with bounded backoff on 429, 5xx and transport
+        failures (ported from PTAB's OCRService._post_with_retry).
+
+        FPD's Mistral tier had no retry at all: one connection reset or one
+        429 discarded an OCR the caller was waiting on. Retries do not
+        re-reserve the daily budget: the reservation is taken once per
+        extract_with_mistral_ocr, above this.
+
+        Inside a call with a time budget (util/deadline.py) every attempt is
+        capped at the time left, and a retry whose backoff would not leave
+        room for another attempt is not taken: the last status is returned,
+        or DeadlineExceeded raised when the last attempt never answered.
+        """
+        last = self._MISTRAL_RETRY_ATTEMPTS - 1
+        for attempt in range(self._MISTRAL_RETRY_ATTEMPTS):
+            response, exc = await self._mistral_attempt(client, url, **kwargs)
+            if exc is None and response.status_code not in self._MISTRAL_RETRY_STATUSES:
+                return response
+            if attempt == last:
+                if exc is not None:
+                    raise exc
+                return response
+            self._log_mistral_retry(url, response, exc, attempt)
+            backoff = 2 ** attempt + random.uniform(0.1, 0.5)
+            if not room_for(backoff):
+                if exc is not None:
+                    raise DeadlineExceeded("no time left to retry") from exc
+                return response
+            await asyncio.sleep(backoff)
+        raise RuntimeError("unreachable")  # pragma: no cover - loop always returns
+
+    @staticmethod
+    async def _mistral_attempt(client: httpx.AsyncClient, url: str, **kwargs):
+        """One POST on what is left of the budget: (response, None), or
+        (None, transport exception)."""
+        try:
+            response = await run_within_deadline(lambda: client.post(url, **kwargs))
+            return response, None
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            return None, exc
+
+    @classmethod
+    def _log_mistral_retry(cls, url: str, response, exc, attempt: int) -> None:
+        reason = type(exc).__name__ if exc is not None else str(response.status_code)
+        logger.warning(
+            "Mistral OCR %s failed (%s); retrying (attempt %d/%d)",
+            url.rsplit("/", 1)[-1], reason, attempt + 1, cls._MISTRAL_RETRY_ATTEMPTS,
+        )
+
     async def _do_mistral_ocr_call(
         self,
         pdf_content: bytes,
@@ -450,7 +608,8 @@ class DocumentExtractionService:
 
         async with httpx.AsyncClient(timeout=self.download_timeout, limits=self.connection_limits) as client:
             # Upload file
-            upload_response = await client.post(
+            upload_response = await self._post_with_retry(
+                client,
                 f"{mistral_base_url}/files",
                 headers=mistral_headers,
                 files=files,
@@ -486,7 +645,8 @@ class DocumentExtractionService:
             ocr_timeout = self.download_timeout * api_constants.OCR_TIMEOUT_MULTIPLIER
             try:
                 async with asyncio.timeout(ocr_timeout):
-                    ocr_response = await client.post(
+                    ocr_response = await self._post_with_retry(
+                        client,
                         f"{mistral_base_url}/ocr",
                         headers={
                             "Authorization": f"Bearer {mistral_api_key}",
@@ -527,6 +687,23 @@ class DocumentExtractionService:
             logger.info(f"Mistral OCR extracted {pages_processed} pages, cost: ${estimated_cost:.4f}")
 
             return full_content, estimated_cost
+
+    async def _ocr_through_breaker(self, *args) -> Tuple[str, float]:
+        """_do_mistral_ocr_call through the Mistral circuit breaker, with a
+        spent time budget kept out of the breaker's failure count: our own
+        deadline is not a provider outage (PTAB exempts "Deadline exceeded"
+        the same way). The DeadlineExceeded is re-raised after the breaker."""
+
+        async def shielded():
+            try:
+                return await self._do_mistral_ocr_call(*args), None
+            except DeadlineExceeded as exc:
+                return None, exc
+
+        outcome, deadline_error = await self.mistral_circuit_breaker.call(shielded)
+        if deadline_error is not None:
+            raise deadline_error
+        return outcome
 
     async def extract_with_mistral_ocr(self, pdf_content: bytes, page_count: int = 0) -> Tuple[str, float]:
         """
@@ -596,19 +773,15 @@ class DocumentExtractionService:
                 raise ValueError("MISTRAL_API_KEY required for OCR extraction")
 
             mistral_base_url = "https://api.mistral.ai/v1"
-            # Mistral OCR model slug. Default `mistral-ocr-latest` tracks Mistral's
-            # current GA model (= OCR 4 as of 2026-06-23); pin a dated slug
-            # (e.g. mistral-ocr-2503, mistral-ocr-4-0) via MISTRAL_OCR_MODEL.
-            mistral_ocr_model = os.getenv("MISTRAL_OCR_MODEL", "mistral-ocr-latest")
 
             # Resilience: bound concurrent Mistral OCR calls with the
             # service-specific semaphore and route the actual HTTP call
             # through the Mistral circuit breaker so repeated upstream
             # failures fail fast instead of piling up retries/timeouts.
             async with self.mistral_semaphore:
-                text, actual_cost = await self.mistral_circuit_breaker.call(
-                    self._do_mistral_ocr_call,
-                    pdf_content, pages_to_request, mistral_api_key, mistral_base_url, mistral_ocr_model,
+                text, actual_cost = await self._ocr_through_breaker(
+                    pdf_content, pages_to_request, mistral_api_key, mistral_base_url,
+                    mistral_ocr_model(),
                 )
             _mistral_daily_spend_settle(estimated_cost, actual_cost)
             settled = True
@@ -627,6 +800,35 @@ class DocumentExtractionService:
         finally:
             if not settled:
                 _mistral_daily_spend_release(estimated_cost)
+
+    async def _run_mistral_ocr(self, pdf_content: bytes, pages_requested: int) -> str:
+        """The Mistral tier: the page range the run requests
+        (MISTRAL_OCR_MAX_PAGES applied)."""
+        text, cost = await self.extract_with_mistral_ocr(pdf_content, pages_requested)
+        logger.info(f"Mistral OCR extraction successful ({len(text)} chars, ${cost:.4f})")
+        return text
+
+    async def _run_docling(
+        self, docling: DoclingClient, pdf_content: bytes, page_count: int,
+        document_identifier: str, progress_cb, request_id: str,
+        mistral_error: Exception,
+    ) -> str:
+        """The Docling run. Called only when the tier is usable (configured,
+        page count within DOCLING_MAX_PAGES)."""
+        if not room_for(0.0, _DOCLING_MIN_SECONDS):
+            # Wave 2 A.5: Docling runs only on what is left of the call's
+            # time budget; with too little left the call says so.
+            logger.info(f"[{request_id}] Docling skipped: the call's time budget is nearly spent")
+            raise DeadlineExceeded("no time left for Docling") from mistral_error
+        await progress_cb(
+            60,
+            f"Running Docling OCR ({page_count} pages, "
+            f"may take ~{page_count * 20}s)..."
+        )
+        return await run_within_deadline(
+            lambda: docling.extract(pdf_content, filename=f"{document_identifier}.pdf"),
+            minimum=_DOCLING_MIN_SECONDS,
+        )
 
     async def _resolve_document_for_hybrid_extraction(
         self, petition_id: str, document_identifier: str, request_id: str
@@ -668,19 +870,12 @@ class DocumentExtractionService:
         document_code = document.get(FPDFields.DOCUMENT_CODE, "UNKNOWN")
         page_count = document.get(FPDFields.PAGE_COUNT, 0)
 
-        # Extract direct download URL from document metadata (for proxy registration)
-        # The proxy needs this URL to fetch PDFs from USPTO API on behalf of users
-        # Find the PDF download option in downloadOptionBag
-        download_options = document.get(FPDFields.DOWNLOAD_OPTION_BAG, [])
-        direct_download_url = None
-        for option in download_options:
-            if option.get(FPDFields.MIME_TYPE_IDENTIFIER) == 'PDF':
-                direct_download_url = option.get(FPDFields.DOWNLOAD_URL)
-                break
-
-        if not direct_download_url:
-            # Try getting download URL directly from document (still for proxy registration)
-            direct_download_url = document.get(FPDFields.DOWNLOAD_URL, "")
+        # The USPTO PDF URL for this document: the document's own <id>.pdf
+        # option, else the first PDF option, else the documented URL pattern
+        # (api/payload_compat.select_pdf_download).
+        direct_download_url, _ = select_pdf_download(
+            document, petition_records[0].get(FPDFields.APPLICATION_NUMBER_TEXT)
+        )
 
         if not direct_download_url:
             return format_error_response(
@@ -693,6 +888,10 @@ class DocumentExtractionService:
             "document_code": document_code,
             "page_count": page_count,
             "direct_download_url": direct_download_url,
+            "document": document,
+            "application_number": petition_records[0].get(FPDFields.APPLICATION_NUMBER_TEXT),
+            "patent_number": petition_records[0].get(FPDFields.PATENT_NUMBER),
+            "decision_date": petition_records[0].get(FPDFields.DECISION_DATE),
         }
 
     async def _extract_with_docling_fallback(
@@ -715,14 +914,11 @@ class DocumentExtractionService:
         # "unknown" is not silently treated as "small".
         if not (isinstance(page_count, int) and page_count > 0):
             page_count = _pdf_page_count(pdf_content) or 0
-        if docling.is_available() and docling.within_page_limit(page_count):
-            await progress_cb(
-                60,
-                f"Running Docling OCR ({page_count} pages, "
-                f"may take ~{page_count * 20}s)..."
-            )
-            docling_text = await docling.extract(
-                pdf_content, filename=f"{document_identifier}.pdf"
+        usable = docling.is_available() and docling.within_page_limit(page_count)
+        if usable:
+            docling_text = await self._run_docling(
+                docling, pdf_content, page_count, document_identifier,
+                progress_cb, request_id, mistral_error,
             )
             logger.info(f"[{request_id}] Docling extraction successful ({len(docling_text)} chars)")
             await progress_cb(95, "Docling OCR complete")
@@ -777,8 +973,7 @@ class DocumentExtractionService:
         mistral_error: Optional[Exception] = None
         pages_requested, total_pages = resolve_ocr_page_window(pdf_content, page_count)
         try:
-            mistral_text, cost = await self.extract_with_mistral_ocr(pdf_content, pages_requested)
-            logger.info(f"[{request_id}] Mistral OCR extraction successful ({len(mistral_text)} chars, ${cost:.4f})")
+            mistral_text = await self._run_mistral_ocr(pdf_content, pages_requested)
             await progress_cb(95, "Mistral OCR complete")
             extraction_result.update({
                 "extracted_content": mistral_text,
@@ -796,19 +991,18 @@ class DocumentExtractionService:
 
         await self._extract_with_docling_fallback(
             extraction_result, pdf_content, page_count, document_identifier,
-            request_id, progress_cb, mistral_error
+            request_id, progress_cb, mistral_error,
         )
 
     async def _extract_forced_mistral(
-        self, extraction_result: Dict[str, Any], pdf_content: bytes, page_count: int, request_id: str
+        self, extraction_result: Dict[str, Any], pdf_content: bytes, page_count: int,
+        request_id: str,
     ) -> None:
         """auto_optimize=False path: use Mistral OCR directly. Mutates
         extraction_result in place."""
         logger.info(f"[{request_id}] Using Mistral OCR directly (auto_optimize=False)")
         pages_requested, total_pages = resolve_ocr_page_window(pdf_content, page_count)
-        mistral_text, cost = await self.extract_with_mistral_ocr(pdf_content, pages_requested)
-
-        logger.info(f"[{request_id}] Mistral OCR extraction successful ({len(mistral_text)} chars, ${cost:.4f})")
+        mistral_text = await self._run_mistral_ocr(pdf_content, pages_requested)
         extraction_result.update({
             "extracted_content": mistral_text,
             "extraction_method": "Mistral OCR (mistral-ocr-latest)",
@@ -817,31 +1011,63 @@ class DocumentExtractionService:
         _mark_ocr_page_cap(extraction_result, mistral_text, pages_requested, total_pages)
 
     @staticmethod
+    def _format_extraction_refusal(e: Exception, request_id: str) -> Dict[str, Any]:
+        """A refusal raised inside the hybrid-extraction flow, as the
+        caller's envelope. A RateLimitedError (the PDF fetch refused for
+        pacing, ODP rate-limit wave plan 2c) carries its own envelope with
+        `retry_after_seconds`, which is the answer; anything else is a
+        ValueError and takes the S60 mapping below."""
+        if isinstance(e, RateLimitedError):
+            logger.warning(
+                f"[{request_id}] PDF download rate limited "
+                f"({e.envelope.get('rate_limit_source')})"
+            )
+            return e.envelope
+        return DocumentExtractionService._format_extraction_value_error(e, request_id)
+
+    @staticmethod
     def _format_extraction_value_error(e: ValueError, request_id: str) -> Dict[str, Any]:
-        """Map a ValueError raised anywhere in the hybrid-extraction flow
-        (missing/invalid Mistral key, auth/payment failures, OCR timeout,
-        daily budget ceiling, feature flag off, upstream non-PDF/oversize
-        response) to the dev-mode detail message + 400 envelope. Prod already
-        genericizes via format_error_response's status/keyword overrides."""
+        """Map a ValueError raised anywhere in the hybrid-extraction flow to
+        the caller's envelope.
+
+        S60 (2026-10-12 audit): provider and billing state never reaches a
+        caller, in any environment. A missing or rejected OCR key, a payment
+        or credit failure, an OCR provider error or timeout, and every Docling
+        failure (which names its internal URL and env settings) answer one
+        authored 503 "temporarily unavailable"; the detail goes to the server
+        log only. What the caller can act on keeps its own text: the document
+        itself was not a PDF or was over the size cap (400), and the two
+        neutral capacity and feature-flag messages (written in this module,
+        no provider or cost detail) pass through as before."""
         msg = str(e)
-        logger.error(f"[{request_id}] Validation error: {msg}")
-        if "MISTRAL_API_KEY required" in msg:
-            detail = f"{msg}. pypdf extraction failed - document may be scanned. To enable OCR, configure MISTRAL_API_KEY."
-        elif "authentication failed" in msg or "payment required" in msg or "Mistral API error" in msg:
-            detail = f"Mistral OCR request failed: {msg}"
-        elif "timed out" in msg:
-            detail = f"Mistral OCR request timed out: {msg}"
-        elif "capacity limit reached" in msg or "currently disabled" in msg:
-            detail = msg
-        elif "did not return a PDF" in msg or ("byte" in msg and "limit" in msg):
-            detail = f"Document could not be extracted: {msg}"
-        else:
-            detail = msg
+        if "did not return a PDF" in msg or ("byte" in msg and "limit" in msg):
+            logger.warning(f"[{request_id}] Document not extractable: {msg}")
+            return format_error_response(
+                f"Document could not be extracted: {msg}", 400, request_id
+            )
+        if "capacity limit reached" in msg or "currently disabled" in msg:
+            logger.warning(f"[{request_id}] Extraction refused: {msg}")
+            return format_error_response(msg, 400, request_id, authored=True)
+        logger.error(f"[{request_id}] Extraction provider failure: {msg}")
         return format_error_response(
-            detail,
-            400,
-            request_id
+            EXTRACTION_UNAVAILABLE_MESSAGE, 503, request_id, authored=True
         )
+
+    async def _extract_from_pdf(
+        self, extraction_result: Dict[str, Any], pdf_content: bytes, page_count: int,
+        petition_id: str, document_identifier: str, request_id: str, progress_cb,
+        auto_optimize: bool,
+    ) -> None:
+        """The PDF tiers, by auto_optimize setting."""
+        if auto_optimize:
+            await self._extract_auto_optimized(
+                extraction_result, pdf_content, page_count,
+                document_identifier, request_id, progress_cb,
+            )
+        else:
+            await self._extract_forced_mistral(
+                extraction_result, pdf_content, page_count, request_id,
+            )
 
     async def extract_document_content_hybrid(
         self,
@@ -855,6 +1081,8 @@ class DocumentExtractionService:
 
         Workflow:
         1. Fetch petition details to get document metadata
+        1b. If auto_optimize=True, read the document's Word (.docx) or XML
+            (xmlarchive) version when USPTO serves one; done, no PDF
         2. Download PDF content directly from the USPTO API
         3. If auto_optimize=True (extraction chain, Lesson 19):
            a. Try pypdf extraction (free)
@@ -897,6 +1125,28 @@ class DocumentExtractionService:
             page_count = doc_info["page_count"]
             direct_download_url = doc_info["direct_download_url"]
 
+            extraction_result = {
+                "success": True,
+                "document_code": document_code,
+                "page_count": page_count,
+                "request_id": request_id,
+                # The petition's own record, so the tool can hand back a
+                # ready-made cite_as instead of leaving the model to build a
+                # link (a claude.ai run linked the wrong application, 2026-10-07).
+                "application_number": doc_info["application_number"],
+                "patent_number": doc_info["patent_number"],
+                "decision_date": doc_info["decision_date"],
+            }
+
+            # Tier 0: the Word/XML version, when USPTO serves one (petition
+            # decisions do since the 2026-10 payload change). Exact text and
+            # no PDF download; only reached on the auto path, since
+            # auto_optimize=False asks for OCR by name.
+            if auto_optimize and await self._apply_free_text_tier(
+                extraction_result, doc_info, document_identifier, request_id, _progress
+            ):
+                return extraction_result
+
             # Download the PDF DIRECTLY from the USPTO API with our own key.
             # (Pre-migration this hopped through the download proxies, but the
             # proxy direct routes are now X-Proxy-Token protected and content
@@ -909,28 +1159,18 @@ class DocumentExtractionService:
             logger.info(f"[{request_id}] Downloaded {len(pdf_content)} bytes")
             await _progress(30, "PDF downloaded — extracting text...")
 
-            # Extract text based on auto_optimize setting
-            extraction_result = {
-                "success": True,
-                "document_code": document_code,
-                "page_count": page_count,
-                "request_id": request_id
-            }
-
-            if auto_optimize:
-                await self._extract_auto_optimized(
-                    extraction_result, pdf_content, page_count,
-                    document_identifier, request_id, _progress
-                )
-            else:
-                await self._extract_forced_mistral(
-                    extraction_result, pdf_content, page_count, request_id
-                )
-
+            await self._extract_from_pdf(
+                extraction_result, pdf_content, page_count, petition_id,
+                document_identifier, request_id, _progress, auto_optimize,
+            )
             return extraction_result
 
-        except ValueError as e:
-            return self._format_extraction_value_error(e, request_id)
+        except DeadlineExceeded:
+            # Wave 2 A.5: one end-to-end budget per call (util/deadline.py).
+            logger.warning(f"[{request_id}] Extraction stopped at the call's time budget")
+            return deadline_exceeded_response(request_id)
+        except (RateLimitedError, ValueError) as e:
+            return self._format_extraction_refusal(e, request_id)
         except Exception as e:
             logger.error(f"[{request_id}] Error extracting document content: {str(e)}")
             return format_error_response(

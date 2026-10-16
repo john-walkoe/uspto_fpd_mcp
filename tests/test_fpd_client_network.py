@@ -1,7 +1,8 @@
 """Offline mocked tests for FPDClient's network layer (api/fpd_client.py):
-retry-on-5xx succeeding on the 2nd attempt, no-retry on 4xx, 429 being
-retryable with a fixed >=5s delay, and the circuit-open -> stale-cache
-fallback path.
+retry-on-5xx succeeding on the 2nd attempt, no-retry on 4xx, the single
+429 retry after max(5 s, Retry-After) (ODP rate-limit wave 2026-10-11, plan
+2c; the fuller matrix is tests/test_odp_429_handling.py), and the
+circuit-open -> stale-cache fallback path.
 
 httpx.AsyncClient is patched to route through httpx.MockTransport (the same
 pattern already used in tests/test_security_hardening_phase23.py) so no real
@@ -349,26 +350,112 @@ async def test_by_application_without_documents_makes_no_wrapper_call(monkeypatc
 # ------------------------------------------------------------------ F-R3/R7/R9
 
 
-async def test_a_429_retry_waits_at_least_as_long_as_retry_after(monkeypatch):
-    """F-R3: the header was parsed into a RateLimitError nobody read, and the
-    retry loop used the fixed 5s cool-down regardless. A throttle asking for
-    60s produced three rejected calls where one correct retry would have won.
-    """
+async def test_a_429_with_a_retry_after_over_the_absorb_ceiling_is_the_envelope(monkeypatch):
+    """F-R3 made Retry-After the floor of the retry wait; the ODP rate-limit
+    wave (2026-10-13, plan 2c / D4) replaced the uncapped sleep with one
+    retry after max(5 s, Retry-After) only when that wait is at most 10 s.
+    A header asking for 20 s is not slept on: the 429 is the answer, with
+    the wait the upstream asked for, and the bulkhead slot stays free."""
     sleep_calls = _patch_no_sleep(monkeypatch)
+    calls = {"n": 0}
 
     async def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(429, headers={"Retry-After": "45"}, json={})
+        calls["n"] += 1
+        return httpx.Response(429, headers={"Retry-After": "20"}, json={})
 
     _patch_async_client(monkeypatch, handler)
     client = FPDClient(api_key="test-key-1234567890")
 
-    await client._make_request("throttled", method="GET")
+    result = await client._make_request("throttled", method="GET")
 
-    assert sleep_calls, "no retry was attempted"
-    assert all(delay >= 45.0 for delay in sleep_calls), sleep_calls
+    assert sleep_calls == []
+    assert calls["n"] == 1
+    assert result["status_code"] == 429
+    assert result["rate_limited"] is True
+    assert result["retry_after_seconds"] == 20.0
+    assert result["retry_after"] == 20
+
+
+async def test_a_retry_after_inside_the_absorb_ceiling_is_waited_once(monkeypatch):
+    """Before 2026-10-13 this pinned RETRY_ATTEMPTS - 1 sleeps of the 30 s
+    cap for a Retry-After of 30. Under plan 2c a 30 s ask is over the 10 s
+    absorb ceiling (see the test above); an 8 s ask is slept exactly once,
+    and a second 429 is never retried."""
+    sleep_calls = _patch_no_sleep(monkeypatch)
+    calls = {"n": 0}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(429, headers={"Retry-After": "8"}, json={})
+
+    _patch_async_client(monkeypatch, handler)
+    client = FPDClient(api_key="test-key-1234567890")
+
+    result = await client._make_request("throttled", method="GET")
+
+    assert sleep_calls == [8.0]
+    assert calls["n"] == 2
+    assert result["status_code"] == 429
+    assert result["rate_limited"] is True
+
+
+async def test_a_retry_after_over_the_ceiling_is_not_slept_on(monkeypatch):
+    """S62 (2026-10-12 audit): Retry-After had no ceiling, so a 'wait a day'
+    header parked the request (and a bulkhead slot) for a day. Over the
+    ceiling the 429 is the answer, with the wait the upstream asked for.
+    (2026-10-13: the ceiling is now the 10 s absorb ceiling of plan 2c.)"""
+    sleep_calls = _patch_no_sleep(monkeypatch)
+    calls = {"n": 0}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(429, headers={"Retry-After": "86400"}, json={})
+
+    _patch_async_client(monkeypatch, handler)
+    client = FPDClient(api_key="test-key-1234567890")
+
+    result = await client._make_request("throttled", method="GET")
+
+    assert sleep_calls == []
+    assert calls["n"] == 1
+    assert result["status_code"] == 429
+    assert result["retry_after"] == 86400
+    assert result["retry_after_seconds"] == 86400.0
+
+
+def test_the_planned_429_wait_never_exceeds_the_absorb_ceiling():
+    """Replaces the pre-wave check that _compute_retry_delay clamped a 429
+    to the 30 s sleep cap: that cap is gone (2026-10-13), and
+    _compute_retry_delay no longer sees a 429 at all."""
+    assert fpd_client_module.planned_429_wait(600, False, 1e9) is None
+    assert fpd_client_module.planned_429_wait(10, False, 1e9) == 10.0
+    assert fpd_client_module.planned_429_wait(None, False, 1e9) == FPDClient.RETRY_429_DELAY
+
+
+async def test_the_bulkhead_slot_is_free_while_a_retry_waits(monkeypatch):
+    """S62: the semaphore used to wrap the whole retry loop, sleeps included."""
+    seen = []
+    client = FPDClient(api_key="test-key-1234567890")
+
+    async def _fake_sleep(seconds):
+        seen.append(client.uspto_semaphore._value)
+
+    monkeypatch.setattr(fpd_client_module.asyncio, "sleep", _fake_sleep)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={})
+
+    _patch_async_client(monkeypatch, handler)
+
+    await client._make_request("flaky", method="GET")
+
+    assert seen, "no retry wait happened"
+    assert all(value == FPDClient.MAX_CONCURRENT_REQUESTS for value in seen), seen
 
 
 async def test_a_429_without_retry_after_keeps_the_fixed_cool_down(monkeypatch):
+    """The 5 s cool-down is the floor of the single 429 wait (plan 2c,
+    2026-10-13): exactly one sleep of it, never the pre-wave repeated ones."""
     sleep_calls = _patch_no_sleep(monkeypatch)
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -379,8 +466,7 @@ async def test_a_429_without_retry_after_keeps_the_fixed_cool_down(monkeypatch):
 
     await client._make_request("throttled", method="GET")
 
-    assert sleep_calls
-    assert all(delay == client.RETRY_429_DELAY for delay in sleep_calls), sleep_calls
+    assert sleep_calls == [client.RETRY_429_DELAY]
 
 
 async def test_an_http_date_retry_after_falls_back_rather_than_guessing(monkeypatch):
@@ -396,7 +482,7 @@ async def test_an_http_date_retry_after_falls_back_rather_than_guessing(monkeypa
 
     await client._make_request("throttled", method="GET")
 
-    assert all(delay == client.RETRY_429_DELAY for delay in sleep_calls), sleep_calls
+    assert sleep_calls == [client.RETRY_429_DELAY]
 
 
 async def test_a_non_retryable_429_envelope_reports_retry_after(monkeypatch):
@@ -485,3 +571,47 @@ async def test_half_open_admits_only_one_probe(monkeypatch):
 
     release.set()
     assert await first == "ok"
+
+
+async def test_a_trimmed_petition_does_not_hollow_the_fallback_cache(monkeypatch):
+    """S61 (2026-10-12 audit): the breaker fallback cache stored the very
+    object get_petition_by_id then trimmed (documentBag popped), so the stale
+    copy served on an open circuit had no documents."""
+    from fpd_mcp.api.field_constants import FPDFields
+
+    _patch_no_sleep(monkeypatch)
+    petition_id = "e55bd36d-961f-511e-b72c-b4b1529d67ef"
+    record = {
+        FPDFields.PETITION_DECISION_RECORD_IDENTIFIER: petition_id,
+        FPDFields.DOCUMENT_BAG: [{FPDFields.DOCUMENT_IDENTIFIER: "DOC1"}],
+    }
+    upstream = {"down": False}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if upstream["down"]:
+            return httpx.Response(503, json={"error": "service unavailable"})
+        return httpx.Response(
+            200, json={"count": 1, FPDFields.PETITION_DECISION_DATA_BAG: [record]}
+        )
+
+    _patch_async_client(monkeypatch, handler)
+    client = FPDClient(api_key="test-key-1234567890")
+
+    first = await client.get_petition_by_id(petition_id, include_documents=False)
+    assert FPDFields.DOCUMENT_BAG not in first[FPDFields.PETITION_DECISION_DATA_BAG][0]
+
+    upstream["down"] = True
+    for _ in range(client.uspto_circuit_breaker.failure_threshold):
+        await client._make_request("down-endpoint", method="GET")
+    assert client.uspto_circuit_breaker.state == CircuitState.OPEN
+
+    stale = await client.get_petition_by_id(petition_id, include_documents=True)
+
+    assert stale["_cached"] is True
+    bag = stale[FPDFields.PETITION_DECISION_DATA_BAG][0][FPDFields.DOCUMENT_BAG]
+    assert bag == [{FPDFields.DOCUMENT_IDENTIFIER: "DOC1"}]
+
+    # And the stale caller's own trims do not reach the cache either.
+    stale[FPDFields.PETITION_DECISION_DATA_BAG][0].pop(FPDFields.DOCUMENT_BAG)
+    again = await client.get_petition_by_id(petition_id, include_documents=True)
+    assert again[FPDFields.PETITION_DECISION_DATA_BAG][0][FPDFields.DOCUMENT_BAG]

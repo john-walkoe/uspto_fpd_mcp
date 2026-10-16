@@ -97,15 +97,15 @@ The PowerShell script will:
 - **FPD_PROXY_PORT**: Local proxy port (default: `8081`, avoids conflict with PFW on `8080`)
   - Only used in standalone mode (no PFW MCP detected)
   - When PFW MCP is installed, FPD automatically uses PFW's centralized proxy (port `8080`), but will fall back to FPD's local proxy port
-  - **Centralized Proxy Benefits**: Single port for all USPTO MCPs, 7-day persistent links, unified rate limiting
+  - **Centralized Proxy Benefits**: Single port for all USPTO MCPs, persistent links (PFW_LINK_TTL_DAYS / PFW_LINK_MAX_USES, 1 day / 25 downloads by default), unified rate limiting
 
 ## 🚀 FastMCP 4.0
 
-The server runs on **FastMCP 4.0.1** (`fastmcp[apps]>=4.0.0,<5.0.0`) over the
+The server runs on **FastMCP 4.0.3** (`fastmcp[apps]>=4.0.3,<5.0.0`) over the
 **MCP Python SDK 2.x**, speaking MCP protocol revision **2026-07-28**. It ships
 MCP Apps (petition search cards + recent-downloads panel render as iframes in
-Claude Desktop), progress notifications during document extraction, 7-day
-persistent download links, dual STDIO/HTTP transport, and a Dockerfile for
+Claude Desktop), progress notifications during document extraction, persistent
+download links (1 day, up to 25 downloads, by default), dual STDIO/HTTP transport, and a Dockerfile for
 containerized deployment.
 
 **Environment variables:**
@@ -128,6 +128,8 @@ containerized deployment.
 | `ENABLE_PROXY_SERVER` | `true` | Enable the local download proxy |
 | `ENABLE_ALWAYS_ON_PROXY` | `true` | Start the proxy at startup vs on-demand |
 | `FPD_PROXY_PORT` | `8081` | Local download proxy port |
+| `FPD_LINK_TTL_DAYS` | `1` | Local persistent-link lifetime in days (never less than 1) |
+| `FPD_LINK_MAX_USES` | `25` | Downloads one local link allows (0 disables the ceiling) |
 | `FPD_PROXY_BASE_URL` | unset | Externally reachable proxy base URL (Docker/reverse proxy) — used in emitted persistent links |
 | `PROXY_TOKEN` | auto | Fixed proxy auth token for cross-process registration |
 | `PROXY_ALLOWED_IPS` | unset | Extra client IPs/CIDRs allowed at the proxy (Docker subnets) |
@@ -153,13 +155,16 @@ containerized deployment.
 | `FPD_AUTH_ACCESS_TTL` | `3600` | Access token lifetime (seconds; default 1 hour) |
 | `FPD_AUTH_REFRESH_TTL` | `2592000` | Refresh token lifetime (seconds; default 30 days, idle timeout) |
 | `FPD_AUTH_DB_PATH` | `data/mcp_auth.db` | SQLite user database; may be shared across MCP servers on the same host |
+| `FPD_OWNER_EMAILS` | unset | Comma-separated owner accounts; when set only they hold `fpd:admin` and only they can grant it (unset keeps roster admins as admins, with a startup warning) |
 | `USPTO_SHARED_RATE_LIMIT_DIR` | unset | Enable cross-process rate limiter; bind-mounted directory (unset = disabled) |
 | `USPTO_SHARED_RATE_LIMIT_RPS` | `4.0` | Token bucket rate (tokens/sec, shared across all 4 USPTO MCPs) |
-| `USPTO_SHARED_MAX_CONCURRENT` | `2` | Concurrency slots (shared in-flight requests across all 4 MCPs) |
+| `USPTO_SHARED_MAX_CONCURRENT` | `1` | Concurrency slots (shared in-flight requests across all 4 MCPs; USPTO's burst limit per key is 1) |
+| `USPTO_SHARED_MAX_WAIT_SECONDS` | `45` | Ceiling on one limiter acquire, queue wait included; past it the call returns the rate-limit envelope with `retry_after_seconds` |
 | `USPTO_MAX_RESPONSE_CHARS` | `40000` | Character budget for structured tool responses (searches, petition details) |
 | `USPTO_MAX_CONTENT_CHARS` | `120000` | Character budget for document-content responses |
 | `USPTO_RESPONSE_BOUNDS_ENABLED` | `true` | `false` disables the response-size guard entirely |
-| `FPD_TOOL_DEADLINE_SECONDS` | `150` | Overall deadline for one content-extraction tool call |
+| `FPD_CONTENT_DEADLINE_SECONDS` | `85` | One end-to-end deadline per content-extraction call and per petition-details call with documents (replaces `FPD_TOOL_DEADLINE_SECONDS`) |
+| `FPD_STATISTICS_DEADLINE_SECONDS` | `60` | One time budget per `FPD_get_petition_statistics` / `FPD_get_dismissal_grounds` call; sections not reached in time are returned flagged `partial` |
 | `FPD_MAX_PDF_BYTES` | `26214400` | Per-document extraction byte cap (25MB) |
 | `FPD_MAX_EGRESS_PDF_BYTES` | `104857600` | Cap on a PDF streamed through the download proxy (100MB) |
 | `FPD_MAX_MCP_BODY_BYTES` | `4194304` | Request body cap on the `/mcp` surface |
@@ -172,7 +177,10 @@ Tool responses are measured in **characters** (`len(json.dumps(...))`), not
 token estimates, because an oversized result is replaced client-side with a
 truncation error the server never sees. Every search envelope carries a
 `paging` block (`limit_requested`, `limit_applied`, `offset`, `returned`,
-`total`, `has_more`, `next_offset`). Three further markers appear **only when
+`total`, `has_more`, `next_offset`). When the size guard trims a search page,
+`paging` is rewritten to the rows actually returned (`returned` = rows kept,
+`next_offset` = `offset + returned`, `has_more` true), so paging by
+`next_offset` never skips a row. Three further markers appear **only when
 they applied** and are absent entirely on a no-op:
 
 | Marker | Meaning |
@@ -296,6 +304,16 @@ FPD_Search_petitions_by_application(
 )
 ```
 
+### Petition Statistics Functions
+
+| Registered Tool Name | Purpose | Requirements |
+|----------|----------|----------|
+| `FPD_get_petition_statistics` | Granted / granted-in-part / denied / dismissed counts and rates for any scope (petition type, art unit, technology center, dates), by type, art unit, year and more; optional turnaround sample | USPTO_API_KEY |
+| `FPD_get_dismissal_grounds` | Where a scope's dismissals fall, a sample of dismissal decisions with document identifiers, optional phrase-mention counts | USPTO_API_KEY |
+| `FPD_list_petition_types` | Petition type codes with USPTO's names and live counts ('revival' -> 501, 502, 562, ...) | USPTO_API_KEY |
+
+All counts are USPTO's own facet counts on the petition decisions API; see [docs/PETITION-STATISTICS.md](docs/PETITION-STATISTICS.md) and `FPD_get_guidance(section="petition_practice")`.
+
 ### Document Processing Functions
 
 | Registered Tool Name | Purpose | Requirements |
@@ -321,7 +339,7 @@ FPD_Search_petitions_by_application(
 - **Browser Download Tier (`FPD_get_document_download`)**: Secure proxy downloads with enhanced filenames
   - **Click-to-download** URLs that work directly in any browser
   - **Centralized proxy integration** - If set up, auto-detects PFW MCP and uses unified proxy (port 8080) for all USPTO documents downloads, will fall back to local proxy if issues detected with centralized proxy.
-    - **Persistent links** - 7-day encrypted links when using PFW centralized proxy (work across MCP restarts)
+    - **Persistent links** - encrypted links when using PFW centralized proxy (PFW_LINK_TTL_DAYS / PFW_LINK_MAX_USES, 1 day / 25 downloads by default; work across MCP restarts)
     - **Unified architecture** - Single HTTP proxy (port 8080) for all USPTO MCPs when PFW installed
     - **Standalone fallback** - Local proxy (port 8081) when PFW not detected
   - **Enhanced filenames** - Professional format with petition date, app/patent numbers, and description
@@ -451,7 +469,7 @@ When both PFW and FPD MCPs are installed, FPD automatically integrates with PFW'
 **Architecture Benefits:**
 
 - **Single Port** - One HTTP server (port 8080) for all USPTO document downloads
-- **Persistent Links** - 7-day encrypted links via PFW's SQLite database (work across MCP restarts)
+- **Persistent Links** - encrypted links via PFW's link store (PFW_LINK_TTL_DAYS / PFW_LINK_MAX_USES, 1 day / 25 downloads by default; work across MCP restarts)
 - **Unified Rate Limiting** - Shared USPTO limits (5 requests/10 seconds) across all MCPs
 - **Cross-MCP Caching** - PFW caches documents from all USPTO MCPs for faster access
 - **Automatic Detection** - FPD detects PFW at startup and switches to centralized mode
@@ -464,7 +482,7 @@ When both PFW and FPD MCPs are installed, FPD automatically integrates with PFW'
 4. PFW stores metadata in database (petition_id, download_url, api_key, enhanced_filename)
 5. FPD returns download link: `http://localhost:8080/download/{petition_id}/{doc_id}`
 6. User clicks link → PFW fetches from USPTO → streams PDF with enhanced filename
-7. Link persists for 7 days and works across MCP restarts
+7. Link persists for PFW_LINK_TTL_DAYS (1 day by default) and works across MCP restarts
 
 **Standalone Mode:**
 
@@ -532,7 +550,7 @@ uspto_fpd_mcp/
 │   └── check_prompt_injections.py # Standalone scanning script (pre-commit hook)
 ├── src/
 │   └── fpd_mcp/
-│       ├── main.py                 # Composition root: FastMCP server, 9 tools (8 registered by default; FPD_manage_users needs FPD_ENABLE_USER_MANAGEMENT), OAuth wiring
+│       ├── main.py                 # Composition root: FastMCP server, 12 tools (11 registered by default; FPD_manage_users needs FPD_ENABLE_USER_MANAGEMENT), OAuth wiring
 │       ├── __main__.py            # Entry point for -m execution
 │       ├── runtime.py             # Settings/logging bootstrap + service singletons
 │       ├── server_bootstrap.py    # Transport startup + proxy lifecycle
@@ -541,6 +559,7 @@ uspto_fpd_mcp/
 │       ├── shared_secure_storage.py # Cross-MCP encrypted API key storage
 │       ├── tools/                 # Tool implementations (registered by main.py)
 │       │   ├── petitions.py       # 5 search/details tools
+│       │   ├── statistics.py      # Petition statistics, dismissal grounds, petition types
 │       │   ├── documents.py       # Download + content-extraction tools
 │       │   ├── guidance.py        # FPD_get_guidance
 │       │   └── admin.py           # FPD_manage_users (registration-gated)
@@ -556,10 +575,13 @@ uspto_fpd_mcp/
 │       ├── api/
 │       │   ├── fpd_client.py      # FPD API client (retries, circuit breakers, cache)
 │       │   ├── docling_client.py  # Self-hosted Docling OCR client
+│       │   ├── payload_compat.py  # Petition decision payload shapes (2026-10 API change)
+│       │   ├── petition_types.py  # Petition type code table
+│       │   ├── free_text_variants.py # Word/XML document versions before the PDF
 │       │   └── field_constants.py # Field name constants
 │       ├── proxy/
 │       │   ├── server.py          # HTTP proxy for secure downloads
-│       │   ├── secure_link_cache.py # 7-day encrypted persistent links
+│       │   ├── secure_link_cache.py # encrypted persistent links (FPD_LINK_TTL_DAYS / FPD_LINK_MAX_USES)
 │       │   ├── centralized_integration.py # PFW centralized-proxy mode
 │       │   └── rate_limiter.py    # USPTO rate limiting compliance
 │       ├── auth/                  # OAuth 2.1 provider (Google + Entra dual IdP)
@@ -574,7 +596,8 @@ uspto_fpd_mcp/
 │       │   └── security_logger.py # Security event logging
 │       ├── services/
 │       │   ├── fpd_service.py     # Core business logic layer
-│       │   └── document_extraction.py # pypdf -> Mistral OCR -> Docling pipeline
+│       │   ├── petition_statistics.py # Facet-driven petition statistics
+│       │   └── document_extraction.py # Word/XML -> pypdf -> Mistral OCR -> Docling pipeline
 │       ├── ui/                    # MCP App HTML view resources
 │       └── util/
 │           ├── database.py
@@ -888,10 +911,17 @@ services:
     environment:
       USPTO_SHARED_RATE_LIMIT_DIR: /var/run/uspto-shared-rate-limit
       USPTO_SHARED_RATE_LIMIT_RPS: "4"       # default; total across ALL 4 MCPs
-      USPTO_SHARED_MAX_CONCURRENT: "2"       # default; shared in-flight slots
+      USPTO_SHARED_MAX_CONCURRENT: "1"       # default; shared in-flight slots
+      USPTO_SHARED_MAX_WAIT_SECONDS: "45"    # default; acquire ceiling
 ```
 
-One token bucket and 2 concurrency slots are shared across every process
-mounting the directory — a heavier MCP naturally draws more of the budget
-under load, and a long PDF download occupies a slot for its full duration
-(not just connection setup), per USPTO's burst=1 guidance.
+One FIFO queue, one token bucket and one concurrency slot are shared across
+every process mounting the directory, so sends on the key never overlap and
+are at least 1/RPS apart. A 429 seen by any process is written to
+`cooldown.json` in the directory (now + max(5 s, Retry-After)) and every
+process waits it out. On a 429 a call is retried once after max(5 s,
+Retry-After) when that wait is at most 10 s and fits the call's time
+budget; otherwise the rate-limit envelope (`rate_limited`,
+`retry_after_seconds`) is the answer. A PDF download is buffered under the
+slot and the slot released before the bytes are served, so a slow client
+connection never holds the key.

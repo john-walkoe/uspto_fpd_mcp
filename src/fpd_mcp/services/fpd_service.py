@@ -84,6 +84,7 @@ class FPDService:
         date_range: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
+        final_only: bool = False,
     ) -> Dict[str, Any]:
         """
         Search petitions by art unit
@@ -93,6 +94,7 @@ class FPDService:
             date_range: Optional date range filter
             limit: Number of results to return
             offset: Starting position, for paging past `limit`
+            final_only: Restrict to final petition decisions
 
         Returns:
             Search results for the art unit
@@ -102,6 +104,7 @@ class FPDService:
             date_range=date_range,
             limit=limit,
             offset=offset,
+            final_only=final_only,
         )
 
         # Filter response using balanced field set
@@ -116,6 +119,7 @@ class FPDService:
         include_documents: bool = False,
         limit: int = 100,
         offset: int = 0,
+        final_only: bool = False,
     ) -> Dict[str, Any]:
         """
         Search petitions by application number
@@ -128,6 +132,7 @@ class FPDService:
                 documents gets the complete record, not the balanced subset).
             limit: Maximum number of petition records to return
             offset: Starting position, for paging past `limit`
+            final_only: Restrict to final petition decisions
 
         Returns:
             All petitions for the application
@@ -148,6 +153,7 @@ class FPDService:
                 None if include_documents
                 else self.field_manager.get_fields("petitions_balanced")
             ),
+            final_only=final_only,
         )
 
         # Filter response using balanced field set (unless documents requested)

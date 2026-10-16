@@ -14,6 +14,7 @@ from fastmcp import Context
 from fastmcp.apps import AppConfig
 
 from ..api.field_constants import FPDFields
+from ..api.payload_compat import select_pdf_download
 from ..app_uris import DOWNLOADS_URI
 from ..proxy.server import generate_enhanced_filename
 from ..runtime import get_api_client
@@ -30,9 +31,26 @@ from ..shared.injection_scan import (
     scan_text,
 )
 from ..shared.response_bounds import apply_text_window, content_char_budget
+from ..util.deadline import (
+    Deadline,
+    bind_deadline,
+    content_deadline_seconds,
+    deadline_exceeded_response,
+)
 from ..util.identity import get_viewer_key
 from ..util.secure_logger import get_secure_logger
+from ..util.citations import petition_cite_as
 from ..validators import validate_document_identifier, validate_petition_id
+
+#: A claude.ai run "fixed a wording slip" in a quoted decision that had none
+#: (2026-10-07). The provenance note says documents are verbatim; this says
+#: what to do about it.
+QUOTING_RULE = (
+    "Quote extracted_content exactly as returned: never correct, smooth or "
+    "modernize the Office's wording, spelling or grammar, even where it looks "
+    "like a slip. Mark any omission with an ellipsis and say what was left out. "
+    "Cite the decision with cite_as."
+)
 
 logger = get_secure_logger(__name__)
 
@@ -48,21 +66,6 @@ _CONTENT_WINDOW_NOTE = (
 #: Canonical marker sub-key -> this repo's pre-existing top-level key, kept
 #: alongside `_window` for this release.
 _CONTENT_WINDOW_ALIASES = {"applied": "truncated", "note": "truncation_note"}
-
-#: F-X2: overall budget for one content-extraction tool call, in seconds.
-_DEFAULT_TOOL_DEADLINE_SECONDS = 150.0
-
-
-def _tool_deadline_seconds() -> float:
-    """FPD_TOOL_DEADLINE_SECONDS; an unparseable value uses the default."""
-    raw = os.getenv("FPD_TOOL_DEADLINE_SECONDS", "")
-    if not raw.strip():
-        return _DEFAULT_TOOL_DEADLINE_SECONDS
-    try:
-        return max(1.0, float(raw))
-    except (TypeError, ValueError):
-        logger.warning("Invalid FPD_TOOL_DEADLINE_SECONDS; using the default")
-        return _DEFAULT_TOOL_DEADLINE_SECONDS
 
 
 def _resolve_document_metadata(
@@ -93,18 +96,14 @@ def _resolve_document_metadata(
             petition_result, petition_id, document_identifier
         )
 
-    # Resolve the USPTO PDF download URL from the document metadata
-    download_options = document_metadata.get(FPDFields.DOWNLOAD_OPTION_BAG, [])
-    pdf_option = None
-    for option in download_options:
-        if option.get(FPDFields.MIME_TYPE_IDENTIFIER) == 'PDF':
-            pdf_option = option
-            break
-
-    pdf_download_url = pdf_option.get(FPDFields.DOWNLOAD_URL) if pdf_option else None
+    # Resolve the USPTO PDF download URL from the document metadata. A
+    # native (2026-10) bag can list more than one PDF option; the document's
+    # own <id>.pdf wins (api/payload_compat.select_pdf_download).
+    pdf_download_url, page_count = select_pdf_download(
+        document_metadata, petition_data[0].get(FPDFields.APPLICATION_NUMBER_TEXT)
+    )
     if not pdf_download_url:
         return format_error_response("PDF not available for this document", 404)
-    page_count = pdf_option.get(FPDFields.PAGE_TOTAL_QUANTITY, 0)
 
     return {
         "petition_data": petition_data,
@@ -144,7 +143,6 @@ async def _deliver_download_link(
     document_metadata: Dict[str, Any],
     pdf_download_url: str,
     page_count: int,
-    proxy_port: Optional[int],
 ) -> Dict[str, Any]:
     """Resolve a (centralized or local) proxy download link, register it
     with the recent-downloads registry, and build the tool response.
@@ -177,8 +175,17 @@ async def _deliver_download_link(
         register_with_centralized_proxy,
     )
 
+    from ..proxy.secure_link_cache import (
+        CENTRALIZED_LINK_LIFETIME_TEXT,
+        CENTRALIZED_LINK_TTL_DAYS,
+        get_link_cache,
+        link_lifetime_text,
+    )
+
     final_url = None
     proxy_mode = "local"
+    expires_in_days = CENTRALIZED_LINK_TTL_DAYS
+    lifetime_text = CENTRALIZED_LINK_LIFETIME_TEXT
     if get_centralized_base_url():
         final_url = await register_with_centralized_proxy(
             petition_id=petition_id,
@@ -192,19 +199,22 @@ async def _deliver_download_link(
         else:
             logger.warning("⚠️  Centralized registration failed - falling back to local FPD proxy")
 
-    # Mode 2: local FPD proxy with a 7-day encrypted persistent link.
+    # Mode 2: local FPD proxy with an encrypted persistent link
+    # (FPD_LINK_TTL_DAYS / FPD_LINK_MAX_USES, 1 day / 25 downloads by default).
     # The hash in the URL is the credential — no auth header needed
     # (Lesson 43), so browser navigation works.
     if final_url is None:
-        local_port = proxy_port if proxy_port is not None else get_local_proxy_port()
+        # S4 (2026-10-12 audit): the bind port is operator configuration
+        # (FPD_PROXY_PORT), never a caller's argument.
+        local_port = get_local_proxy_port()
         await _ensure_proxy_server_running(local_port)
 
-        from ..proxy.secure_link_cache import get_link_cache
         proxy_base = (
             os.getenv("FPD_PROXY_BASE_URL", "").strip().rstrip("/")
             or f"http://localhost:{local_port}"
         )
-        final_url = get_link_cache().generate_persistent_link(
+        link_cache = get_link_cache()
+        final_url = await link_cache.mint_persistent_link(
             petition_id=petition_id,
             document_identifier=document_identifier,
             file_download_uri=pdf_download_url,
@@ -212,6 +222,9 @@ async def _deliver_download_link(
             base_url=proxy_base,
         )
         proxy_mode = "local"
+        expires_in_days = link_cache.cache_duration.days
+        lifetime_text = link_lifetime_text(link_cache.cache_duration.days,
+                                           link_cache.max_uses)
 
     # Register with the recent-downloads panel/page (best effort).
     # viewer_key scopes the registry entry to this caller (H2) — the
@@ -238,7 +251,7 @@ async def _deliver_download_link(
         "proxy_download_url": final_url,
         "enhanced_filename": enhanced_filename,
         "page_count": page_count,
-        "expires_in_days": 7,
+        "expires_in_days": expires_in_days,
         "download_id": download_registry_id,
         "downloads_page_opened": False,
 
@@ -246,9 +259,11 @@ async def _deliver_download_link(
             "mode": proxy_mode,
             "note": (
                 "Unified download through PFW centralized proxy (persistent links, "
-                "enhanced rate limiting, cross-MCP sharing)"
+                "enhanced rate limiting, cross-MCP sharing; link lifetime "
+                f"{lifetime_text})"
                 if proxy_mode == "centralized"
-                else "Local FPD proxy persistent link (valid 7 days, survives proxy restarts)"
+                else f"Local FPD proxy persistent link (valid {lifetime_text}, "
+                "survives proxy restarts)"
             ),
         },
 
@@ -280,7 +295,10 @@ Download, PDF, file, link, URL, save, open in a browser, get a copy of a petitio
 
 **Workflow:**
 1. FPD_Get_petition_details(petition_id='uuid', include_documents=True) → get documentBag
+   (or FPD_Search_petitions_by_application(..., include_documents=True))
 2. FPD_get_document_download(petition_id='uuid', document_identifier='ABC123') → get download link
+   (any documentIdentifier from that bag works: the petition's own papers, or a
+   file-wrapper fallback entry for a petition served without a bag)
 3. Provide download link to user
 
 **CRITICAL RESPONSE FORMAT - Always format with BOTH clickable link and raw URL:**
@@ -298,10 +316,14 @@ Why both formats?
 **Parameters:**
 - petition_id: Petition UUID from search results
 - document_identifier: Document identifier from documentBag
-- proxy_port: Optional (defaults to FPD_PROXY_PORT env var or 8081)
+- proxy_port: Accepted for backwards compatibility only. The proxy runs on the
+  port the operator configured (FPD_PROXY_PORT, default 8081); a different value
+  is ignored and `proxy_port_note` says so.
 - generate_persistent_link: Deprecated — links are ALWAYS persistent now
-  (7-day encrypted links via the PFW centralized proxy when configured,
-  otherwise via the local FPD proxy). The parameter is accepted for
+  (encrypted links valid for 1 day, up to 25 downloads, by default: via the
+  PFW centralized proxy when configured (PFW_LINK_TTL_DAYS /
+  PFW_LINK_MAX_USES), otherwise via the local FPD proxy (FPD_LINK_TTL_DAYS /
+  FPD_LINK_MAX_USES); `expires_in_days` reports it). The parameter is accepted for
   backwards compatibility and ignored."""
     # Input validation (M4: shape-checked, not just non-empty)
     if not petition_id or len(petition_id.strip()) == 0:
@@ -326,14 +348,32 @@ Why both formats?
     if "error" in resolved:
         return resolved
 
-    return await _deliver_download_link(
+    result = await _deliver_download_link(
         petition_id=petition_id,
         document_identifier=document_identifier,
         petition_data=resolved["petition_data"],
         document_metadata=resolved["document_metadata"],
         pdf_download_url=resolved["pdf_download_url"],
         page_count=resolved["page_count"],
-        proxy_port=proxy_port,
+    )
+    note = _ignored_proxy_port_note(proxy_port)
+    if note and isinstance(result, dict) and result.get("success"):
+        result["proxy_port_note"] = note
+    return result
+
+
+def _ignored_proxy_port_note(proxy_port: Any) -> Optional[str]:
+    """S4: the note for a caller-supplied proxy_port that differs from the
+    configured one (the value is never used to bind or to build a link)."""
+    if proxy_port is None:
+        return None
+    configured = get_local_proxy_port()
+    if proxy_port == configured:
+        return None
+    return (
+        f"proxy_port={proxy_port!r} was ignored: the download proxy runs on the port "
+        f"this server is configured with ({configured}). The parameter is kept only "
+        "so older calls do not fail."
     )
 
 
@@ -403,11 +443,14 @@ async def fpd_get_document_content(
     max_chars: Optional[int] = None,
     ctx: Context = None
 ) -> Dict[str, Any]:
-    """Extract full text from USPTO petition documents with intelligent hybrid extraction (pypdf -> OCR -> Docling).
+    """Extract full text from USPTO petition documents with intelligent hybrid extraction (Word/XML version -> pypdf -> OCR -> Docling).
 Read, extract, text, contents, full document, OCR, quote the petition, the decision, or the Office's reasoning.
 
-PREREQUISITE: First use FPD_Get_petition_details to get document_identifier from documentBag.
-Auto-optimizes extraction: fast direct pypdf text extraction for text-based PDFs, OCR only for scanned documents.
+PREREQUISITE: a document_identifier, from FPD_Get_petition_details (documentBag) or from the decision
+samples FPD_get_dismissal_grounds returns (each carries a ready read_with call).
+Auto-optimizes extraction: the Word (.docx) or XML version when USPTO serves one beside the PDF (petition
+decisions usually have both; exact text, no PDF download), else fast direct pypdf text extraction for
+text-based PDFs, OCR only for scanned documents.
 MISTRAL_API_KEY is optional - without it, scanned documents fall back to Docling
 (self-hosted) when DOCLING_SERVE_URL is configured and the document is
 <= DOCLING_MAX_PAGES (default 25 - petition decisions are usually short).
@@ -420,10 +463,12 @@ USE CASES:
 - Profile examiner behavior from supervisory review petitions
 
 EXTRACTION MODES:
-- auto_optimize=True (default): Try fast pypdf first, fall back to OCR only when the document is scanned
+- auto_optimize=True (default): Word/XML version first, then pypdf, OCR only when the document is scanned
 - auto_optimize=False: Use OCR directly (slower; highest fidelity for scanned documents)
 
-Returns: extracted_content, extraction_method, page_count
+Returns: extracted_content, extraction_method, page_count; free_text_variants lists the Word/XML versions tried;
+cite_as is the decision's verified link (cite with it, never build one); quoting_rule: quote extracted_content
+exactly, never correct the Office's wording
 
 LARGE DOCUMENTS - CURSOR:
 - char_offset (default 0): where to start reading in the extracted text
@@ -464,34 +509,29 @@ For document selection and extraction-tier strategies, use FPD_get_guidance('ext
             except Exception:
                 pass
 
-    # F-X2: one deadline over the whole tool call. Serially this can spend a
-    # petition fetch (3 x 30s), a PDF download (60s), a pypdf parse, a Mistral
-    # upload + OCR (2 x 60s) and then Docling (300s). Nothing budgeted the
-    # sum, so the worst case exceeded a typical client tool timeout and the
-    # caller saw a transport failure with no envelope, no request id and no
-    # recovery note — the outcome the response-size guard exists to avoid on
-    # the size axis.
+    # F-X2 / Wave 2 A.5: one end-to-end deadline over the whole tool call
+    # (FPD_CONTENT_DEADLINE_SECONDS, default 85 s, under Cloudflare's ~100 s
+    # cut). Serially this can spend a petition fetch with the file-wrapper
+    # fallback, a PDF download, a pypdf parse, a Mistral upload + OCR with
+    # retries and then Docling. Every one of those steps takes what is left
+    # of the one budget (util/deadline.py) and a spent budget comes back as
+    # a "Deadline exceeded" envelope; the asyncio.timeout is the backstop for
+    # a step that does not check (the pypdf parse).
+    deadline = Deadline(content_deadline_seconds())
     try:
-        async with asyncio.timeout(_tool_deadline_seconds()):
-            # Use API client's hybrid extraction method
-            result = await api_client.extract_document_content_hybrid(
-                petition_id=petition_id,
-                document_identifier=document_identifier,
-                auto_optimize=auto_optimize,
-                progress_cb=_progress
-            )
+        with bind_deadline(deadline):
+            async with asyncio.timeout(deadline.seconds):
+                result = await api_client.extract_document_content_hybrid(
+                    petition_id=petition_id,
+                    document_identifier=document_identifier,
+                    auto_optimize=auto_optimize,
+                    progress_cb=_progress
+                )
     except TimeoutError:
         logger.warning(
-            "Content extraction exceeded the %ss tool deadline",
-            _tool_deadline_seconds(),
+            "Content extraction exceeded the %ss call deadline", deadline.seconds
         )
-        return format_error_response(
-            "Extraction exceeded the time budget for one call. Retry with "
-            "auto_optimize=False, or use FPD_get_document_download to fetch "
-            "the PDF directly.",
-            408,
-            authored=True,
-        )
+        return deadline_exceeded_response()
 
     # Check for errors
     if "error" in result:
@@ -503,6 +543,17 @@ For document selection and extraction-tier strategies, use FPD_get_guidance('ext
     # — content-minimization) and the `injection_scan` key is ABSENT when
     # the text is clean. Nothing is ever stripped or rewritten.
     result["provenance_note"] = RETRIEVED_TEXT_NOTE
+    # CITATIONS ARE LINKS: the same verified link the search and details tools
+    # carry, built from the petition's own record. Without it a model built
+    # one by hand and linked the wrong application (claude.ai, 2026-10-07).
+    cite = petition_cite_as(
+        result.pop("decision_date", None),
+        result.get("application_number"),
+        result.pop("patent_number", None),
+    )
+    if cite:
+        result["cite_as"] = cite
+    result["quoting_rule"] = QUOTING_RULE
     extracted = result.get("extracted_content")
     kinds = scan_text(extracted) if isinstance(extracted, str) else []
     if kinds:
@@ -530,7 +581,7 @@ For document selection and extraction-tier strategies, use FPD_get_guidance('ext
             },
             "pattern_detection": {
                 "description": "Compare text across multiple petitions to find common themes",
-                "action": "Identify recurring denial reasons, successful argument patterns"
+                "action": "Compare decisions of ONE petition type: the grounds of dismissals or denials, what granted petitions supplied"
             },
             "cross_mcp_correlation": {
                 "description": "Correlate petition arguments with PTAB challenges",
@@ -550,7 +601,7 @@ For document selection and extraction-tier strategies, use FPD_get_guidance('ext
             "Search for CFR citations (e.g., '37 CFR 1.137', '37 CFR 1.181')",
             "Identify petition outcome reasoning in decision text",
             "Cross-reference with PFW prosecution history for context",
-            "Compare with PTAB challenge arguments if patent granted"
+            "If the application issued as a patent, check PTAB for challenges"
         ]
     }
 

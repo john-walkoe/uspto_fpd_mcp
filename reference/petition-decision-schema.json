@@ -64,7 +64,7 @@
             "courtActionIndicator":{
                "type": "boolean"
             },
-            "lastIngestionDateTime": {
+            "lastModifiedDateTime": {
               "type": "string"
             },
             "patentNumber": {
@@ -96,9 +96,6 @@
                 {
                   "type": "object",
                   "properties": {
-                    "applicationNumberText": {
-                      "type": "string"
-                    },
                     "officialDate": {
                       "type": "string"
                     },
@@ -109,9 +106,6 @@
                       "type": "string"
                     },
                     "documentCodeDescriptionText": {
-                      "type": "string"
-                    },
-                    "documentDirectionCategory": {
                       "type": "string"
                     },
                     "downloadOptionBag": {
@@ -125,27 +119,21 @@
                             },
                             "documentURI": {
                               "type": "string"
-                            },
-                            "pageTotalQuantity": {
-                              "type": "integer"
                             }
                           },
                           "required": [
                             "mimeTypeIdentifier",
-                            "documentURI",
-                            "pageTotalQuantity"
+                            "documentURI"
                           ]
                         }
                       ]
                     }
                   },
                   "required": [
-                    "applicationNumberText",
                     "officialDate",
                     "documentIdentifier",
                     "documentCode",
                     "documentCodeDescriptionText",
-                    "documentDirectionCategory",
                     "downloadOptionBag"
                   ]
                 }

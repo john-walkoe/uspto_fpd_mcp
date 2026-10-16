@@ -114,7 +114,7 @@ FPD_get_document_download
 `http://localhost:8081/download/persistent/{24-hex}` (local mode) or the
 PFW proxy's `/document/persistent/{hash}` (centralized mode);
 `enhanced_filename` like `PET-YYYY-MM-DD_APP-13408005_...pdf`;
-`download_id` set; `expires_in_days: 7`. Click the link in a browser:
+`download_id` set; `expires_in_days: 1` (FPD_LINK_TTL_DAYS locally, PFW_LINK_TTL_DAYS centralized). Click the link in a browser:
 ERR_ABORTED + the PDF lands in Downloads (no 401 — the hash is the
 credential). Passes through the file-wrapper fallback while the upstream
 `includeDocuments` outage lasts (verified on prod 2026-09-03).
@@ -222,4 +222,9 @@ carries the SAME figure. The two disagreeing is a defect: before
 2026-09-03 this call returned `paging.total` 53 alongside
 `_bounds.items_total` 50, the page the guard had been handed.
 `_bounds.items_returned` is smaller than both, and correctly counts the
-records actually present in the response.
+records actually present in the response. `paging.returned` equals
+`_bounds.items_returned`, `paging.has_more` is true and `paging.next_offset`
+is `offset + paging.returned`: before 2026-09-11 a trimmed page kept its
+pre-guard `returned` / `next_offset` (100 / 100 over 50 rows on
+`FPD_Search_petitions_minimal(decision_type="DENIED", limit=100)`), so paging
+by `next_offset` skipped the rows the guard dropped.

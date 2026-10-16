@@ -368,7 +368,86 @@ async def test_all_tiers_fail_returns_error_shape(monkeypatch):
 
     assert result["success"] is False
     assert "error" in result
+    # S60: a provider failure is a generic 503, never the provider's text.
+    assert result["status_code"] == 503
+    assert "MISTRAL" not in result["error"].upper()
+
+
+# --------------------------------------------------------------------- S60
+
+_PROVIDER_STRINGS = (
+    "Mistral API payment required - insufficient credits",
+    "MISTRAL_API_KEY required for OCR extraction",
+    "Mistral API authentication failed - check MISTRAL_API_KEY",
+    "Mistral API error 500: upstream body",
+    "OCR operation timed out after 120s - PDF may be too large or complex",
+    "Could not connect to docling-serve at http://10.0.0.5:5001. "
+    "Check that the server is running and DOCLING_SERVE_URL is correct",
+)
+
+_LEAK_MARKERS = ("mistral", "payment", "credit", "docling", "api_key", "configure", "10.0.0.5")
+
+
+@pytest.mark.parametrize("environment", ["production", "development"])
+@pytest.mark.parametrize("provider_text", _PROVIDER_STRINGS)
+async def test_provider_failures_never_reach_the_caller(monkeypatch, environment, provider_text):
+    """S60 (2026-10-12 audit): billing and key-configuration text from the
+    OCR provider used to come back verbatim in a 400. In every environment it
+    is now one authored 503 and the detail stays in the server log."""
+    monkeypatch.setenv("ENVIRONMENT", environment)
+    service = _make_service()
+    monkeypatch.setattr(
+        service, "extract_with_mistral_ocr", AsyncMock(side_effect=ValueError(provider_text))
+    )
+
+    result = await service.extract_document_content_hybrid(
+        petition_id=_PETITION_ID, document_identifier=_DOCUMENT_ID, auto_optimize=False
+    )
+
+    assert result["success"] is False
+    assert result["status_code"] == 503
+    assert result["error"] == de_module.EXTRACTION_UNAVAILABLE_MESSAGE
+    lowered = json.dumps(result).lower()
+    for marker in _LEAK_MARKERS:
+        assert marker not in lowered
+
+
+async def test_the_402_mapping_reaches_the_caller_as_a_generic_503(monkeypatch):
+    """The real 402 path: Mistral answers Payment Required, the service maps
+    it to its billing ValueError, and the caller still sees only the generic
+    503."""
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("MISTRAL_API_KEY", "fake-mistral-key-for-tests")
+    service = _make_service()
+    request = httpx.Request("POST", "https://api.mistral.ai/v1/ocr")
+    response = httpx.Response(402, request=request, text="insufficient credits")
+    monkeypatch.setattr(
+        service,
+        "_ocr_through_breaker",
+        AsyncMock(side_effect=httpx.HTTPStatusError("402", request=request, response=response)),
+    )
+
+    result = await service.extract_document_content_hybrid(
+        petition_id=_PETITION_ID, document_identifier=_DOCUMENT_ID, auto_optimize=False
+    )
+
+    assert result["status_code"] == 503
+    assert "payment" not in result["error"].lower()
+    assert "mistral" not in result["error"].lower()
+
+
+async def test_a_document_problem_keeps_its_own_400(monkeypatch):
+    service = _make_service()
+    monkeypatch.setattr(
+        service,
+        "extract_with_mistral_ocr",
+        AsyncMock(side_effect=ValueError("Upstream did not return a PDF document")),
+    )
+    result = await service.extract_document_content_hybrid(
+        petition_id=_PETITION_ID, document_identifier=_DOCUMENT_ID, auto_optimize=False
+    )
     assert result["status_code"] == 400
+    assert "did not return a PDF" in result["error"]
 
 
 # --------------------------------------------------------------------- M-19

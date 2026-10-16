@@ -155,7 +155,7 @@ USPTO MCP Ecosystem Integration
 
 The USPTO Patent File Wrapper (PFW) MCP provides a centralized proxy server
 that offers enhanced features when used with FPD MCP:
-  - Persistent document links (7-day encrypted URLs)
+  - Persistent document links (encrypted URLs, 1 day by default)
   - Unified rate limiting across all USPTO MCPs
   - Cross-MCP document sharing and caching
 
@@ -208,7 +208,7 @@ Configuration Summary:
 
   [OK] Storage Architecture: Single-key-per-file (shared across USPTO MCPs)
   [OK] Proxy Port: 8081
-  [OK] Installation Directory: C:/Users/John.WALKOE/uspto_fpd_mcp
+  [OK] Installation Directory: C:/Users/YourName/uspto_fpd_mcp
 
 Security Features:
   [*] Configuration Method: DPAPI Encrypted Storage (Secure)
@@ -454,7 +454,7 @@ DPAPI not available - storing with file permissions only
 
 The USPTO Patent File Wrapper (PFW) MCP provides a centralized proxy server
 that offers enhanced features when used with FPD MCP:
-  - Persistent document links (7-day encrypted URLs)
+  - Persistent document links (encrypted URLs, 1 day by default)
   - Unified rate limiting across all USPTO MCPs
   - Cross-MCP document sharing and caching
 
@@ -804,14 +804,14 @@ Set `ENABLE_ALWAYS_ON_PROXY=false` to revert to on-demand startup (not recommend
 
 ### Persistent Links (Progressive Enhancement)
 
-FPD MCP supports **7-day persistent encrypted links** when USPTO PFW MCP is installed:
+FPD MCP supports **persistent encrypted links** (1 day, up to 25 downloads, by default) when USPTO PFW MCP is installed:
 
 **Default Behavior:** `generate_persistent_link=True` (progressive enhancement)
 
 **How it works:**
 
 1. **With PFW installed:**
-   - Returns 7-day encrypted persistent link via PFW's centralized database
+   - Returns an encrypted persistent link via PFW's centralized database (PFW_LINK_TTL_DAYS / PFW_LINK_MAX_USES)
    - Links work across MCP restarts and can be shared/bookmarked
 
 2. **Without PFW (standalone):**

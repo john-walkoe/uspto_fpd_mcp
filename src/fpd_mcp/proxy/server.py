@@ -26,7 +26,8 @@ import httpx
 
 
 def load_env_file() -> None:
-    """Load a .env into the process environment. Call from an entry point.
+    """Load this repo's own .env into the process environment. Call from an
+    entry point.
 
     F-A3: this used to run at module import. Importing anything that reaches
     `proxy/server.py` — which `tools/documents.py` does, so importing the tool
@@ -36,20 +37,37 @@ def load_env_file() -> None:
     the repo and injected a live USPTO_API_KEY into every process that
     imported a tool, including the test run. Loading a .env is a deliberate
     act and now happens only where one is intended.
+
+    ARCH-02 (review 2026-09-28): delegates to `env_bootstrap.load_repo_env`
+    (idempotent — a no-op if `main.py`/`server_app.py` already loaded it),
+    which additionally never walks above the repo (the bare `load_dotenv()`
+    this used to call did, and could land on an unrelated ancestor `.env`).
+    Kept as a thin wrapper — `run_proxy_cli` (the standalone `fpd-proxy`
+    entry point) and existing call sites use this name.
     """
-    from dotenv import load_dotenv
+    from ..env_bootstrap import load_repo_env
 
-    load_dotenv()
+    load_repo_env()
 
 
-from ..api.fpd_client import FPDClient
+from ..api.fpd_client import (
+    RATE_LIMIT_WAIT_FLOOR_SECONDS,
+    FPDClient,
+    retry_after_seconds,
+)
 from ..api.field_constants import FPDFields
+from ..api.payload_compat import select_pdf_download
 from .rate_limiter import rate_limiter
 from ..shared.body_limit import BodySizeLimitMiddleware
 from ..shared.client_ip import client_ip_from_request
 from ..shared.credentials import compare_credential
 from ..shared.error_utils import generate_request_id
 from ..shared.unified_logging import get_logger
+from ..shared.uspto_shared_rate_limiter import (
+    SharedLimiterTimeoutError,
+    get_shared_limiter,
+    note_429,
+)
 from ..shared.uspto_hosts import USPTO_KEY_EVENT_HOOKS
 
 logger = get_logger(__name__)
@@ -219,7 +237,7 @@ a.btn:hover { background: #3d8ba3; }
 </head>
 <body>
 <div class="header"><h1>FPD Recent Downloads</h1><span class="count" id="count">0</span></div>
-<div class="tip">Click <strong>Download PDF</strong> to save a document. Links stay valid for 7 days. This page refreshes automatically.</div>
+<div class="tip">Click <strong>Download PDF</strong> to save a document. Links stay valid for __LINK_LIFETIME__. This page refreshes automatically.</div>
 <div class="container">
   <div class="empty" id="empty" style="display:none">No downloads yet — use <code>FPD_get_document_download</code> in Claude to generate links.</div>
   <div id="cards"></div>
@@ -375,20 +393,65 @@ def generate_enhanced_filename(
     return filename
 
 
-async def _open_upstream_pdf_stream(download_url: str, api_key: str):
-    """Open a USPTO PDF stream with the body verified as a PDF (L24).
+async def _fetch_upstream_pdf(client, download_url: str, api_key: str, max_bytes: int) -> bytes:
+    """One upstream GET, body verified as a PDF (L24) and capped at
+    `max_bytes`, fully buffered. Raises httpx.HTTPStatusError on non-2xx,
+    HTTPException(502) on a non-PDF body or one over the cap."""
+    response = await client.send(
+        client.build_request(
+            "GET", download_url,
+            headers={"X-API-KEY": api_key, "Accept": "application/pdf"},
+        ),
+        stream=True,
+    )
+    try:
+        response.raise_for_status()
+        chunks: List[bytes] = []
+        total = 0
+        async for chunk in response.aiter_bytes(chunk_size=8192):
+            if not chunks and not chunk.startswith(b"%PDF-"):
+                logger.error("Upstream body failed %PDF- magic-byte check")
+                raise HTTPException(status_code=502,
+                                    detail="Upstream returned non-PDF content")
+            total += len(chunk)
+            if total > max_bytes:
+                logger.error(f"Upstream PDF exceeds the {max_bytes}-byte egress cap; aborting")
+                raise HTTPException(status_code=502,
+                                    detail="Upstream document exceeds the download size limit")
+            chunks.append(chunk)
+    finally:
+        await response.aclose()
+    body = b"".join(chunks)
+    if not body.startswith(b"%PDF-"):
+        # An empty body never reached the per-chunk check above.
+        logger.error("Upstream body failed %PDF- magic-byte check")
+        raise HTTPException(status_code=502, detail="Upstream returned non-PDF content")
+    return body
 
-    Prefetches the first chunk and checks the %PDF- magic bytes BEFORE any
-    response headers go to the client, so a mislabeled upstream body (error
-    page, HTML) becomes a clean 502 instead of being served as
-    application/pdf. Returns an async generator that owns the connection.
-    Raises httpx.HTTPStatusError on non-2xx, HTTPException(502) on non-PDF.
+
+async def _open_upstream_pdf_stream(download_url: str, api_key: str, max_bytes: Optional[int] = None):
+    """Fetch a USPTO PDF, verified as a PDF (L24), and return an async
+    generator that serves it to the end user from memory.
+
+    The body is BUFFERED under the shared slot and the slot is released
+    before the first byte goes to the client (ODP rate-limit wave 2026-10-11,
+    plan section 2d, D6). The slot used to be held for the whole streamed
+    transfer, so its hold time depended on the end user's connection; now it
+    depends on USPTO's transfer speed only. The existing egress byte cap
+    (FPD_MAX_EGRESS_PDF_BYTES, L-24) bounds the buffer; an over-cap body is
+    now a clean 502 instead of a silently truncated stream.
+
+    Raises httpx.HTTPStatusError on non-2xx (a 429 is also noted on the
+    shared key cooldown), HTTPException(502) on a non-PDF or over-cap body,
+    and HTTPException(503) carrying a Retry-After header when the shared
+    limiter would not give the fetch a slot inside its ceiling.
 
     The `request` event hook drops `X-API-KEY` on any hop that is not https on
     uspto.gov. These URLs 302 to signed storage URLs, and httpx strips only
     `Authorization` and `Cookie` across origins, so the shared ODP key was
     reaching the redirect target verbatim (M-16).
     """
+    cap = max_bytes if max_bytes is not None else _max_egress_bytes()
     # F-R1: this was a literal 60.0, so an operator raising
     # USPTO_DOWNLOAD_TIMEOUT for large scanned wrappers changed the extraction
     # path and not the browser-download path served from here.
@@ -397,56 +460,31 @@ async def _open_upstream_pdf_stream(download_url: str, api_key: str):
         follow_redirects=True,
         event_hooks=USPTO_KEY_EVENT_HOOKS,
     )
-    response = None
+    limiter = get_shared_limiter()
     try:
-        response = await client.send(
-            client.build_request(
-                "GET", download_url,
-                headers={"X-API-KEY": api_key, "Accept": "application/pdf"},
-            ),
-            stream=True,
-        )
-        response.raise_for_status()
-        iterator = response.aiter_bytes(chunk_size=8192)
-        first_chunk = b""
-        async for chunk in iterator:
-            first_chunk = chunk
-            break
-        if not first_chunk.startswith(b"%PDF-"):
-            logger.error("Upstream body failed %PDF- magic-byte check")
-            raise HTTPException(status_code=502,
-                                 detail="Upstream returned non-PDF content")
-    except Exception:
-        if response is not None:
-            await response.aclose()
-        await client.aclose()
+        if limiter is not None:
+            async with limiter:
+                body = await _fetch_upstream_pdf(client, download_url, api_key, cap)
+        else:
+            body = await _fetch_upstream_pdf(client, download_url, api_key, cap)
+    except SharedLimiterTimeoutError as e:
+        logger.warning(f"Download proxy: shared limiter refusal: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="USPTO request slots are busy; retry shortly",
+            headers={"Retry-After": str(int(RATE_LIMIT_WAIT_FLOOR_SECONDS))},
+        ) from e
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 429:
+            note_429(retry_after_seconds(e.response))
         raise
+    finally:
+        await client.aclose()
 
     async def stream_body():
-        # L-24: the egress stream had a magic-byte check but no byte cap at
-        # all — the ingest path's _MAX_PDF_BYTES bounded only the extraction
-        # fetch. A pathological upstream body was proxied to the browser
-        # without limit. The stream is cut and the truncation logged; the
-        # response has already started, so there is no status code left to
-        # change.
-        cap = _max_egress_bytes()
-        streamed = 0
-        try:
-            if first_chunk:
-                streamed += len(first_chunk)
-                yield first_chunk
-            async for chunk in iterator:
-                streamed += len(chunk)
-                if streamed > cap:
-                    logger.error(
-                        "Upstream PDF exceeded the %d-byte egress cap; "
-                        "stream truncated", cap,
-                    )
-                    return
-                yield chunk
-        finally:
-            await response.aclose()
-            await client.aclose()
+        # Served from memory: no upstream connection and no slot is open here.
+        for offset in range(0, len(body), 8192):
+            yield body[offset:offset + 8192]
 
     return stream_body()
 
@@ -555,8 +593,9 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
 
 # L8: cleanup_expired_links() existed on SecureLinkCache but was never
 # invoked anywhere — expired-link rows would accumulate indefinitely. Run it
-# once a day via a background task tied to the proxy app's lifespan.
-_LINK_CLEANUP_INTERVAL_SECONDS = 24 * 60 * 60
+# via a background task tied to the proxy app's lifespan. Hourly (was daily),
+# since links now live one day by default.
+_LINK_CLEANUP_INTERVAL_SECONDS = 60 * 60
 
 
 async def _periodic_link_cleanup() -> None:
@@ -734,7 +773,7 @@ async def _resolve_proxy_document_and_pdf_url(petition_id: str, document_identif
     """
     _require_proxy_api_client("API client not initialized in proxy server - lifespan may not have completed")
 
-    # Get petition data to find the specific document
+    # Get petition data to find the specific document.
     petition_result = await api_client.get_petition_by_id(
         petition_id,
         include_documents=True
@@ -770,27 +809,22 @@ async def _resolve_proxy_document_and_pdf_url(petition_id: str, document_identif
             detail=f"Document with identifier '{document_identifier}' not found"
         )
 
-    # Find PDF download option
-    download_options = target_doc.get(FPDFields.DOWNLOAD_OPTION_BAG, [])
-    pdf_option = None
-
-    for option in download_options:
-        if option.get(FPDFields.MIME_TYPE_IDENTIFIER) == 'PDF':
-            pdf_option = option
-            break
-
-    if not pdf_option:
+    # The USPTO PDF URL for this document (api/payload_compat.py): the
+    # document's own <id>.pdf option, else the first PDF option, else the
+    # documented URL pattern.
+    download_url, page_count = select_pdf_download(
+        target_doc, petition_data.get(FPDFields.APPLICATION_NUMBER_TEXT)
+    )
+    if not download_url:
         raise HTTPException(
             status_code=404,
             detail="PDF not available for this document"
         )
-
-    download_url = pdf_option.get(FPDFields.DOWNLOAD_URL)
-    if not download_url:
-        raise HTTPException(
-            status_code=404,
-            detail="Download URL not available"
-        )
+    pdf_option = {
+        FPDFields.MIME_TYPE_IDENTIFIER: "PDF",
+        FPDFields.DOWNLOAD_URL: download_url,
+        FPDFields.PAGE_TOTAL_QUANTITY: page_count,
+    }
 
     return petition_data, target_doc, pdf_option, download_url
 
@@ -890,10 +924,10 @@ async def _handle_persistent_download(link_hash: str, request: Request):
             headers={"Retry-After": str(int(remaining_time))}
         )
 
-    from .secure_link_cache import LinkCacheUnavailable, get_link_cache
+    from .secure_link_cache import LinkCacheUnavailable, get_link_cache, link_lifetime_text
 
     try:
-        link_data = get_link_cache().resolve_persistent_link(link_hash)
+        link_data = await get_link_cache().resolve_persistent_link_async(link_hash)
     except LinkCacheUnavailable:
         # F-X1: a database fault is not an expired link. Telling the user
         # their link expired sends them to generate another one that will
@@ -906,7 +940,8 @@ async def _handle_persistent_download(link_hash: str, request: Request):
     if not link_data:
         raise HTTPException(
             status_code=404,
-            detail="Download link not found or expired (links are valid for 7 days). "
+            detail="Download link not found or expired (links are valid for "
+                   f"{link_lifetime_text()}). "
                    "Generate a new link with FPD_get_document_download."
         )
 
@@ -1232,7 +1267,8 @@ def create_proxy_app(
         scrolls to and highlights a specific download_id.
         """
         from fastapi.responses import HTMLResponse
-        return HTMLResponse(_DOWNLOADS_PAGE_HTML)
+        from .secure_link_cache import render_link_lifetime
+        return HTMLResponse(render_link_lifetime(_DOWNLOADS_PAGE_HTML))
 
     # M-4: GET /rate-limit/{client_ip} was removed. It had no caller in src/,
     # it reported another address's request history to whoever asked, and

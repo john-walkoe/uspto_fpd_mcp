@@ -600,7 +600,7 @@ Write-Host "USPTO MCP Ecosystem Integration" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "The USPTO Patent File Wrapper (PFW) MCP provides a centralized proxy server" -ForegroundColor Yellow
 Write-Host "that offers enhanced features when used with FPD MCP:" -ForegroundColor Yellow
-Write-Host "  - Persistent document links (7-day encrypted URLs)" -ForegroundColor White
+Write-Host "  - Persistent document links (encrypted URLs, 1 day by default)" -ForegroundColor White
 Write-Host "  - Unified rate limiting across all USPTO MCPs" -ForegroundColor White
 Write-Host "  - Cross-MCP document sharing and caching" -ForegroundColor White
 Write-Host ""

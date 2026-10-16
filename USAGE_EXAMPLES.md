@@ -418,9 +418,15 @@ print(guidance)
 6. **FPD_get_document_download** - Browser-accessible PDF download URLs
 7. **FPD_get_document_content_with_ocr** - OCR text extraction from petition documents
 
+### Statistics Tools (3 Tools):
+
+8. **FPD_get_petition_statistics** - Granted / dismissed / denied counts and rates for any scope, from USPTO's facet counts
+9. **FPD_get_dismissal_grounds** - Where a scope's dismissals fall, with a sample of dismissal decisions to read
+10. **FPD_list_petition_types** - Petition type codes with USPTO's names and live counts
+
 ### Guidance Tool (1 Tool):
 
-8. **FPD_get_guidance** - Selective guidance sections for context-efficient workflows and cross-MCP integration patterns
+11. **FPD_get_guidance** - Selective guidance sections for context-efficient workflows and cross-MCP integration patterns
 
 ## Query Syntax
 

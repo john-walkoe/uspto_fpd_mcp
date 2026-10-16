@@ -1,8 +1,11 @@
 """Tests for the application-file-wrapper fallback path
 (api/fpd_client.py's get_petition_by_id / get_application_documents), added
-because USPTO's petition-details endpoint 500s upstream for
+because USPTO's petition-details endpoint 500'd upstream for
 includeDocuments=true (verified live 2026-07-10, broken since at least
-2026-07-04 — see tests/TEST_SUITE.md).
+2026-07-04 — see tests/TEST_SUITE.md). Since the 2026-10 payload change the
+petition record carries its own documentBag, includeDocuments is never sent,
+and the fallback runs only for a record whose own bag is empty
+(docs/UPSTREAM-FPD-API-CHANGE-2026-10.md).
 
 FPD documentBag identifiers are also application file-wrapper document
 identifiers, so when the with-documents call comes back as a 5xx-class error
@@ -93,7 +96,7 @@ def _client() -> FPDClient:
 # Client-level: real get_petition_by_id fallback orchestration
 # --------------------------------------------------------------------- #
 
-async def test_fallback_engages_on_upstream_500(monkeypatch):
+async def test_fallback_engages_when_the_record_has_no_bag(monkeypatch):
     client = _client()
     calls = []
 
@@ -101,8 +104,6 @@ async def test_fallback_engages_on_upstream_500(monkeypatch):
         calls.append((endpoint, base_url, kwargs.get("params")))
         if base_url == client.applications_base_url:
             return _wrapper_result()
-        if (kwargs.get("params") or {}).get("includeDocuments") == "true":
-            return dict(_UPSTREAM_500)
         return _without_docs_result()
 
     monkeypatch.setattr(client, "_make_request", fake_make_request)
@@ -130,11 +131,11 @@ async def test_fallback_engages_on_upstream_500(monkeypatch):
     other_doc = next(d for d in petition_record["documentBag"] if d["documentIdentifier"] == "OTHERDOC123")
     assert "pageCount" not in other_doc
 
-    # with-docs (500) -> without-docs -> wrapper documents
-    assert len(calls) == 3
-    assert calls[1][1] is None  # without-docs call uses the default (petition-decisions) host
-    assert calls[2][1] == client.applications_base_url
-    assert calls[2][0] == f"{_APP_NUMBER}/documents"
+    # details (no bag, includeDocuments never sent) -> wrapper documents
+    assert len(calls) == 2
+    assert calls[0][1] is None and not calls[0][2]
+    assert calls[1][1] == client.applications_base_url
+    assert calls[1][0] == f"{_APP_NUMBER}/documents"
 
 
 async def test_fallback_not_triggered_on_404(monkeypatch):
@@ -153,12 +154,16 @@ async def test_fallback_not_triggered_on_404(monkeypatch):
     assert len(calls) == 1  # no retry-without-docs, no wrapper fetch
 
 
-async def test_fallback_not_triggered_on_clean_success(monkeypatch):
+async def test_fallback_not_triggered_when_the_record_has_its_own_bag(monkeypatch):
     client = _client()
     calls = []
     success = {
         "petitionDecisionDataBag": [
-            {"applicationNumberText": _APP_NUMBER, "documentBag": [{"documentIdentifier": _DOC_ID}]}
+            {
+                "petitionDecisionRecordIdentifier": _PETITION_ID,
+                "applicationNumberText": _APP_NUMBER,
+                "documentBag": [{"documentIdentifier": _DOC_ID}],
+            }
         ]
     }
 
@@ -171,7 +176,8 @@ async def test_fallback_not_triggered_on_clean_success(monkeypatch):
     result = await client.get_petition_by_id(_PETITION_ID, include_documents=True)
 
     assert result is success
-    assert "document_metadata_source" not in result
+    assert result["document_metadata_source"] == "petition_record"
+    assert result["petitionDecisionDataBag"][0]["documentBag"][0]["documentIdentifier"] == _DOC_ID
     assert len(calls) == 1
 
 
@@ -181,8 +187,6 @@ async def test_fallback_degrades_when_wrapper_fetch_also_fails(monkeypatch):
     async def fake_make_request(endpoint, method="GET", base_url=None, **kwargs):
         if base_url == client.applications_base_url:
             return {"error": "API error: wrapper down", "status_code": 503, "success": False}
-        if (kwargs.get("params") or {}).get("includeDocuments") == "true":
-            return dict(_UPSTREAM_500)
         return _without_docs_result()
 
     monkeypatch.setattr(client, "_make_request", fake_make_request)
@@ -202,8 +206,6 @@ async def test_fallback_propagates_error_when_without_docs_also_fails(monkeypatc
     client = _client()
 
     async def fake_make_request(endpoint, method="GET", base_url=None, **kwargs):
-        if (kwargs.get("params") or {}).get("includeDocuments") == "true":
-            return dict(_UPSTREAM_500)
         return {"error": "API error: not found", "status_code": 404, "success": False}
 
     monkeypatch.setattr(client, "_make_request", fake_make_request)
@@ -350,9 +352,8 @@ async def test_get_petition_details_surfaces_fallback_metadata(mock_runtime):
 # The fallback bag says what it is (QA ledger 2026-09-03)
 # ---------------------------------------------------------------------------
 # The fallback is correct and stays, but document_metadata_source alone is a
-# label a reader has to know how to decode. The note now says in words that the
-# bag is the application's file wrapper rather than a petition bag, and carries
-# the date the upstream HTTP 500 was last observed.
+# label a reader has to know how to decode. The note says in words that the
+# bag is the application's file wrapper rather than a petition bag.
 
 async def test_fallback_note_says_the_bag_is_the_application_file_wrapper(monkeypatch):
     client = _client()
@@ -360,8 +361,6 @@ async def test_fallback_note_says_the_bag_is_the_application_file_wrapper(monkey
     async def fake_make_request(endpoint, method="GET", base_url=None, **kwargs):
         if base_url == client.applications_base_url:
             return _wrapper_result()
-        if (kwargs.get("params") or {}).get("includeDocuments") == "true":
-            return dict(_UPSTREAM_500)
         return _without_docs_result()
 
     monkeypatch.setattr(client, "_make_request", fake_make_request)
@@ -371,7 +370,7 @@ async def test_fallback_note_says_the_bag_is_the_application_file_wrapper(monkey
     note = result["document_metadata_note"]
     assert "APPLICATION'S FILE WRAPPER, NOT A PETITION BAG" in note
     assert "WHOLE prosecution history" in note
-    assert "2026-09-03" in note
+    assert "no documentBag of its own" in note
 
 
 async def test_search_wrapper_note_says_the_bag_is_the_application_file_wrapper():
@@ -389,4 +388,5 @@ async def test_search_wrapper_note_says_the_bag_is_the_application_file_wrapper(
 
     note = merged["document_metadata_note"]
     assert "APPLICATION'S FILE WRAPPER, NOT A PETITION BAG" in note
-    assert "2026-09-03" in note
+    assert merged["document_metadata_source"] == "application_file_wrapper"
+    assert merged["petitionDecisionDataBag"][0]["document_bag_source"] == "application_file_wrapper"

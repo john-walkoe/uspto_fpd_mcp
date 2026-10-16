@@ -2,7 +2,8 @@
 
 Each module defines its tools as plain (envelope-wrapped) async functions and
 exposes register(mcp); register_all preserves the historical registration
-order: admin -> petitions (search/details) -> documents -> guidance.
+order: admin -> petitions (search/details) -> statistics -> documents ->
+guidance.
 
 register_all also wraps the FastMCP object in a thin registration proxy
 (`_BoundedRegistrar`) so EVERY tool response passes through the shared
@@ -30,7 +31,7 @@ from typing import Any, Dict
 from ..api.field_constants import FPDFields
 from ..shared import response_bounds
 
-from . import admin, documents, guidance, petitions
+from . import admin, documents, guidance, petitions, statistics
 
 
 # ---------------------------------------------------------------------------
@@ -52,6 +53,10 @@ _DOCUMENT_BAG_SPEC = {
     "label": FPDFields.DOCUMENT_BAG,
 }
 
+#: An EMPTY keep_fields means stage 1 skips these records entirely (see
+#: shared/response_bounds.py::_stage_slim), which is what keeps every row's
+#: `cite_as` link alive under the guard. If a field whitelist is ever added
+#: here, `cite_as` has to be on it: a slimmed page still has to be citable.
 _SEARCH_RECORDS_SPEC = {
     "path": _PETITION_RECORDS_PATH,
     "keep_fields": (),  # already field-filtered by FieldManager
@@ -59,10 +64,20 @@ _SEARCH_RECORDS_SPEC = {
     "label": FPDFields.PETITION_DECISION_DATA_BAG,
 }
 
+#: The paging block every search tool publishes (petitions._paging_envelope)
+#: and the record list it counts. The guard rewrites that block when it drops
+#: records, so a trimmed page reports what it carries: `returned` is the rows
+#: kept, `next_offset` is offset + rows kept, `has_more` is true. Before this,
+#: a 100-row page cut to 50 still said `returned: 100, next_offset: 100`, and
+#: a caller paging by next_offset skipped rows 50-99 without being told
+#: (FPD_Search_petitions_minimal(decision_type="DENIED", limit=100), 2026-09-11).
+_SEARCH_PAGING = {"key": "paging", "path": _PETITION_RECORDS_PATH}
+
 _SEARCH_NOTE_TEMPLATE = (
     "Response exceeded the client response-size limit, so fewer records were "
-    "returned than requested. Re-call {tool} with a smaller limit= (and page "
-    "with offset=) to retrieve the rest."
+    "returned than requested. `paging.next_offset` points at the first record "
+    "not returned: re-call {tool} with offset=<paging.next_offset> (and a "
+    "smaller limit=) to retrieve the rest."
 )
 
 _DETAILS_NOTE = (
@@ -85,6 +100,31 @@ _CONTENT_NOTE = (
 #: Canonical `_bounds` sub-key -> this repo's pre-existing top-level key.
 #: Kept for this release so consumers written against the old vocabulary
 #: (documents_returned / documents_total / documents_note) keep working.
+#: The statistics tools carry their breakdowns as lists of buckets. Under the
+#: budget the guard halves each list toward its floor (the largest values
+#: come first, so what is cut is the tail) and `_bounds` says so.
+_STATISTICS_BAGS = (
+    {"path": ["dimensions", "*", "buckets"], "keep_fields": (), "min_items": 5, "label": "dimension buckets"},
+)
+_DISMISSAL_BAGS = tuple(
+    {"path": [key, "buckets"], "keep_fields": (), "min_items": 5, "label": key}
+    for key in ("by_petition_type", "by_technology_center", "by_rule", "by_statute")
+) + ({"path": ["sample"], "keep_fields": (), "min_items": 3, "label": "sample"},)
+
+_STATISTICS_NOTE = (
+    "Response exceeded the client response-size limit, so the longest bucket lists "
+    "were cut to their largest values. Re-call with a smaller top_n= or fewer "
+    "dimensions= to see a complete list."
+)
+_DISMISSAL_NOTE = (
+    "Response exceeded the client response-size limit, so bucket lists and the sample "
+    "were cut. Re-call FPD_get_dismissal_grounds with a smaller top_n= or sample_size=."
+)
+_TYPES_NOTE = (
+    "Response exceeded the client response-size limit, so fewer types were listed. "
+    "Re-call FPD_list_petition_types with search= or a smaller limit=."
+)
+
 _DOCUMENT_ALIASES = {
     "items_returned": "documents_returned",
     "items_total": "documents_total",
@@ -100,19 +140,35 @@ _TOOL_BOUNDS: Dict[str, Dict[str, Any]] = {
     "FPD_Search_petitions_minimal": {
         "bags": (_SEARCH_RECORDS_SPEC,),
         "note": _SEARCH_NOTE_TEMPLATE.format(tool="FPD_Search_petitions_minimal"),
+        "paging": _SEARCH_PAGING,
     },
     "FPD_Search_petitions_balanced": {
         "bags": (_SEARCH_RECORDS_SPEC,),
         "note": _SEARCH_NOTE_TEMPLATE.format(tool="FPD_Search_petitions_balanced"),
+        "paging": _SEARCH_PAGING,
     },
     "FPD_Search_petitions_by_art_unit": {
         "bags": (_SEARCH_RECORDS_SPEC,),
         "note": _SEARCH_NOTE_TEMPLATE.format(tool="FPD_Search_petitions_by_art_unit"),
+        "paging": _SEARCH_PAGING,
     },
     "FPD_Search_petitions_by_application": {
         "bags": (_DOCUMENT_BAG_SPEC, _SEARCH_RECORDS_SPEC),
         "note": _SEARCH_NOTE_TEMPLATE.format(tool="FPD_Search_petitions_by_application"),
         "aliases": _DOCUMENT_ALIASES,
+        "paging": _SEARCH_PAGING,
+    },
+    "FPD_get_petition_statistics": {
+        "bags": _STATISTICS_BAGS,
+        "note": _STATISTICS_NOTE,
+    },
+    "FPD_get_dismissal_grounds": {
+        "bags": _DISMISSAL_BAGS,
+        "note": _DISMISSAL_NOTE,
+    },
+    "FPD_list_petition_types": {
+        "bags": ({"path": ["types"], "keep_fields": (), "min_items": 10, "label": "types"},),
+        "note": _TYPES_NOTE,
     },
     # The caller explicitly asked for document text, so the ceiling is the
     # higher content budget and the tool's own cursor (`_window`) has already
@@ -130,43 +186,17 @@ _TOOL_BOUNDS: Dict[str, Dict[str, Any]] = {
 _DEFAULT_BOUNDS: Dict[str, Any] = {"bags": ()}
 
 
-def _reconcile_bounds_items_total(payload: Any) -> Any:
-    """Make `_bounds.items_total` report the same figure as `paging.total`.
-
-    The shared guard counts `items_total` from the bags PRESENT IN THE
-    RESPONSE it was handed, which on a search page is the page, not the
-    result set. Observed 2026-09-03 on
-    FPD_Search_petitions_balanced(query='ruleBag:"37 CFR 1.137"', limit=50):
-    `paging.total` said 53 (the real number of matching petitions) while
-    `_bounds.items_total` said 50 (the page the guard was given). Two
-    authoritative-looking totals disagreeing by three records is exactly the
-    kind of thing a reader resolves the wrong way, and a reader told to check
-    `_bounds` before saying "only N exist" would have said 50.
-
-    Where the response carries a paging block that knows the true total, that
-    figure wins and `_bounds` reports it, so the marker reads "returned N of
-    total M" with M the same number `paging` gives. `items_returned` is left
-    alone: it still counts the records this response actually carries, which
-    is the one thing `paging.returned` cannot know after the guard sheds rows.
-
-    The legacy `documents_total` alias is deliberately NOT re-mirrored. It
-    describes the documentBag, not the petition result set, so it keeps the
-    guard's own count.
-
-    Runs on every tool result, not only guarded ones: `_bounds` can also be
-    attached earlier by petitions._bound_details_response, in which case the
-    guard here is a no-op and would never see the marker.
-    """
-    if not isinstance(payload, dict):
-        return payload
-    bounds = payload.get(response_bounds.BOUNDS_KEY)
-    paging = payload.get("paging")
-    if not isinstance(bounds, dict) or not isinstance(paging, dict):
-        return payload
-    total = paging.get("total")
-    if isinstance(total, int) and bounds.get("items_total") != total:
-        bounds["items_total"] = total
-    return payload
+# ARCH-03 (review 2026-09-28, common fix D): a local
+# `_reconcile_bounds_items_total` post-processor used to rewrite
+# `_bounds.items_total` to `paging.total` after the shared guard ran,
+# redefining what the canonical marker means (`items_total` = "items in the
+# bag the guard was handed" in PTAB and PFW; FPD alone made it mean "size of
+# the full result set"). Removed: `_bounds.items_total` now means the same
+# thing across all three repos again. The full result-set count was never
+# lost — every paged tool already publishes it as `paging.total`, unaffected
+# by this change; read that field for "how many petitions matched", and
+# `_bounds.items_total` for "how many of the configured bags' items survived
+# the guard".
 
 
 def _bound_result(result: Any, tool_name: str) -> Any:
@@ -181,9 +211,7 @@ def _bound_result(result: Any, tool_name: str) -> Any:
     )
 
     if isinstance(result, dict):
-        return _reconcile_bounds_items_total(
-            response_bounds.bound_structured_response(result, **config)
-        )
+        return response_bounds.bound_structured_response(result, **config)
 
     if isinstance(result, str) and result.lstrip().startswith("{"):
         try:
@@ -195,7 +223,7 @@ def _bound_result(result: Any, tool_name: str) -> Any:
         bounded = response_bounds.bound_structured_response(parsed, **config)
         if response_bounds.BOUNDS_KEY not in bounded:
             return result  # no-op: hand back the original string byte-for-byte
-        return json.dumps(_reconcile_bounds_items_total(bounded), default=str)
+        return json.dumps(bounded, default=str)
 
     return result
 
@@ -269,5 +297,6 @@ def register_all(mcp, auth_provider=None) -> None:
 
     admin.register(bounded, auth_provider)
     petitions.register(bounded)
+    statistics.register(bounded)
     documents.register(bounded)
     guidance.register(bounded)

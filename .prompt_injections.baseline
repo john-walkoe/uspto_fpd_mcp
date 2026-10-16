@@ -35,6 +35,12 @@
       "match": "Variation Selector steganography detected (1 selectors)"
     }
   },
+  "src/fpd_mcp/api/payload_compat.py": {
+    "5cc2f0310054732b": {
+      "line": 12,
+      "match": "prompts"
+    }
+  },
   "src/fpd_mcp/auth/pages.py": {
     "eaf68b827ce9cf77": {
       "line": 14,
@@ -48,6 +54,10 @@
     },
     "4b83c6be3df9860c": {
       "line": 462,
+      "match": "prompt"
+    },
+    "86f440469ac71b9a": {
+      "line": 543,
       "match": "prompt"
     }
   },
@@ -749,6 +759,10 @@
     "f277149deeb1a390": {
       "line": 230,
       "match": "system"
+    },
+    "f3707f20bec90274": {
+      "line": 381,
+      "match": "prompt"
     }
   },
   "src/fpd_mcp/proxy/models.py": {
@@ -765,11 +779,31 @@
     "5840a7b9ddf9273b": {
       "line": 55,
       "match": "system"
+    },
+    "6a80e24c32bddc3c": {
+      "line": 143,
+      "match": "system"
+    },
+    "d43affe32cb87a1d": {
+      "line": 127,
+      "match": "system"
+    },
+    "dd2d4b94ed2bb70e": {
+      "line": 77,
+      "match": "system"
     }
   },
   "src/fpd_mcp/proxy/server.py": {
     "0cf715aa039b380f": {
       "line": 152,
+      "match": "system"
+    },
+    "52edcc68dddbd1d0": {
+      "line": 218,
+      "match": "system"
+    },
+    "7f838fe810af3500": {
+      "line": 211,
       "match": "system"
     },
     "a0793d73cd41bda4": {
@@ -782,6 +816,10 @@
       "line": 79,
       "match": "instructions"
     },
+    "0b03386e7f56a3c6": {
+      "line": 300,
+      "match": "instructions"
+    },
     "35f747dc5e5babfc": {
       "line": 78,
       "match": "ignore"
@@ -790,32 +828,46 @@
       "line": 244,
       "match": "instructions"
     },
+    "44af5b2734703bce": {
+      "line": 96,
+      "match": "instruction"
+    },
     "4ac016e0f2072e2b": {
       "line": 78,
       "match": "instruction"
     },
+    "62b40783547b9505": {
+      "line": 262,
+      "match": "instructions"
+    },
+    "9614fc195f56d182": {
+      "line": 96,
+      "match": "instructions"
+    },
     "b7f6a1fff852f3b3": {
       "line": 78,
+      "match": "instructions"
+    },
+    "d164fd4b0682d758": {
+      "line": 96,
+      "match": "ignore"
+    },
+    "fa1c8ba8bbe78ff2": {
+      "line": 97,
       "match": "instructions"
     }
   },
   "src/fpd_mcp/server_bootstrap.py": {
+    "269a2a8f6b052d0c": {
+      "line": 565,
+      "match": "system"
+    },
     "90b072db235dbd22": {
       "line": 444,
       "match": "system"
     },
     "a2805b2086ae69e5": {
       "line": 525,
-      "match": "system"
-    }
-  },
-  "src/fpd_mcp/shared/health_check.py": {
-    "9e29b5aca2f1a849": {
-      "line": 2,
-      "match": "system"
-    },
-    "fe25b2b9efa8509d": {
-      "line": 4,
       "match": "system"
     }
   },
@@ -944,6 +996,14 @@
       "line": 16,
       "match": "Prompt"
     },
+    "b85017391e0ac724": {
+      "line": 17,
+      "match": "Prompt"
+    },
+    "c22b61a0e7c444ad": {
+      "line": 22,
+      "match": "prompts"
+    },
     "d76ffaddcdc93002": {
       "line": 20,
       "match": "prompts"
@@ -956,6 +1016,10 @@
     }
   },
   "src/fpd_mcp/ui/views.py": {
+    "593f904478a96860": {
+      "line": 473,
+      "match": "system"
+    },
     "68363c79cb2fd773": {
       "line": 457,
       "match": "system"
@@ -1195,16 +1259,6 @@
       "match": "prompt"
     }
   },
-  "src\\fpd_mcp\\shared\\health_check.py": {
-    "366c62d94e02adde": {
-      "line": 4,
-      "match": "system"
-    },
-    "76775b7caa696374": {
-      "line": 2,
-      "match": "system"
-    }
-  },
   "src\\fpd_mcp\\shared\\internal_auth.py": {
     "b706d58c90fde5f5": {
       "line": 2,
@@ -1241,6 +1295,28 @@
       "match": "Variation Selector steganography detected (1 selectors)"
     }
   },
+  "tests/fixtures/fpd_payload_2026_10.json": {
+    "0b3511bcd93f7034": {
+      "line": 419,
+      "match": "SYSTEM"
+    },
+    "681f6b35971c8a12": {
+      "line": 305,
+      "match": "SYSTEM"
+    },
+    "bd5528b90cf8e73c": {
+      "line": 362,
+      "match": "SYSTEM"
+    },
+    "ca65af68c4e96f19": {
+      "line": 66,
+      "match": "SYSTEM"
+    },
+    "f5dc1216b03578f1": {
+      "line": 245,
+      "match": "SYSTEM"
+    }
+  },
   "tests/test_injection_scan.py": {
     "5a1e16c114ddf4da": {
       "line": 23,
@@ -1252,6 +1328,10 @@
     },
     "7fbd40af051d3a66": {
       "line": 121,
+      "match": "ignore"
+    },
+    "8ad0ed811cdc0706": {
+      "line": 167,
       "match": "ignore"
     },
     "95297205c728e747": {

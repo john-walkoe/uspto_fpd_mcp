@@ -141,8 +141,8 @@ def document_not_located_response(
     if petition_result.get("document_metadata_available") is False:
         return format_error_response(
             "Document metadata is temporarily unavailable for this petition "
-            "(USPTO's petition-details documents endpoint is erroring "
-            "upstream), so this server cannot tell whether document "
+            "(the petition record carried no documentBag and the application "
+            "file-wrapper fallback failed), so this server cannot tell whether document "
             f"{document_identifier} exists in petition {petition_id}. This is "
             "NOT a statement that the document is absent. Retry later.",
             503,
@@ -205,6 +205,21 @@ class RateLimitError(FPDException):
                  *, retry_after: int = 60):
         super().__init__(message, 429, request_id)
         self.retry_after = retry_after
+
+
+class RateLimitedError(Exception):
+    """A PDF fetch refused for pacing (ODP rate-limit wave 2026-10-11, plan
+    2c): USPTO answered 429 and the one allowed retry was not taken, or the
+    shared cross-process limiter would not give the fetch a slot inside its
+    wait ceiling. Carries the rate-limit envelope so the content pipeline
+    hands it back as the answer (with `retry_after_seconds`) instead of a
+    generic extraction failure. Distinct from RateLimitError above, which is
+    the FPDException the status mapper builds for a 429 envelope."""
+
+    def __init__(self, envelope: Dict[str, Any]) -> None:
+        super().__init__(envelope.get("error", "Rate limited"))
+        self.envelope = envelope
+        self.retry_after_seconds = envelope.get("retry_after_seconds")
 
 
 class AuthenticationError(FPDException):

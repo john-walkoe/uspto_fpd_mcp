@@ -20,6 +20,7 @@ from .middleware import (
 )
 from .runtime import config_path, settings
 from .shared.body_limit import BodySizeLimitMiddleware
+from .shared.client_ip import trusted_proxy_networks
 from .server_app import get_auth_provider, get_server
 from .util.secure_logger import get_secure_logger
 
@@ -256,10 +257,18 @@ async def _run_proxy_server(port: int = 8081, share_client: bool = True):
     environment variables).
 
     F-D1: `share_client` hands the proxy the process's existing FPDClient so
-    the two paths share one bulkhead, one circuit breaker and one cache. It is
-    only safe when the proxy runs in the SAME event loop as the MCP server —
-    true on the stdio hybrid path, false in HTTP mode where the proxy gets its
-    own loop in a background thread and the asyncio locks cannot cross.
+    the two paths share one bulkhead, one circuit breaker and one cache. It
+    is only safe when the CALLER of `_run_proxy_server` is running on the
+    SAME event loop as the MCP tool calls that also use `get_api_client()`.
+    That is true for the on-demand proxy path (`_ensure_proxy_server_running`,
+    awaited directly from inside a tool call, so it inherits that call's own
+    loop), and false for BOTH the always-on stdio path (ARCH-01, review
+    2026-09-28: `mcp.run()` runs tool calls on a second event loop created
+    inside `asyncio.to_thread`, while the always-on proxy task stays on the
+    outer loop — see the comment above its call site in run_hybrid_server)
+    and HTTP mode (the proxy gets its own loop in a background thread).
+    Callers on a different loop from the tool calls MUST pass
+    share_client=False.
     """
     try:
         import uvicorn
@@ -315,7 +324,26 @@ async def run_hybrid_server(enable_always_on: bool = True, proxy_port: int = 808
         # Start both servers concurrently
         logger.info("Starting hybrid FPD MCP + HTTP proxy server")
 
-        # Run MCP server in a separate task
+        # ARCH-01 (review 2026-09-28, regression of F-D1): `mcp.run()` is a
+        # SYNCHRONOUS wrapper that calls `anyio.run(...)`, which creates its
+        # OWN new event loop. Run inside asyncio.to_thread — a separate OS
+        # thread — that new loop is not the one this coroutine
+        # (run_hybrid_server) is running on. Every tool call therefore
+        # executes on that second, inner loop, while everything else in
+        # this function (including the always-on proxy task started just
+        # below) stays on the outer loop `_run_stdio_transport`'s
+        # asyncio.run() created. F-D1's `share_client=True` default assumed
+        # the proxy and the tools shared one loop — true for the on-demand
+        # proxy path (started via `await` from inside a tool call, so it
+        # inherits the tool's own inner loop) but NOT here: the always-on
+        # proxy task is created on the outer loop while tools run on the
+        # inner one. A shared FPDClient's semaphores/circuit-breaker lock
+        # are asyncio primitives that bind to whichever loop first touches
+        # them, so a proxy-side error on the outer loop could open the
+        # breaker for every tool call on the inner loop, or raise
+        # "got Future attached to a different loop". share_client=False
+        # gives the always-on proxy its own FPDClient, matching what the
+        # HTTP-mode background-thread proxy already does below.
         mcp_task = asyncio.create_task(
             asyncio.to_thread(lambda: mcp.run(transport='stdio'))
         )
@@ -331,7 +359,9 @@ async def run_hybrid_server(enable_always_on: bool = True, proxy_port: int = 808
                 _proxy_server_running = True  # treat as running so tools work
             else:
                 logger.info(f"Always-on mode: Starting HTTP proxy server immediately on port {proxy_port}")
-                _proxy_server_task = asyncio.create_task(_run_proxy_server(proxy_port))
+                _proxy_server_task = asyncio.create_task(
+                    _run_proxy_server(proxy_port, share_client=False)
+                )
                 _proxy_server_task.add_done_callback(_on_proxy_task_done)
                 _proxy_server_running = True
                 # Brief wait to ensure server starts cleanly
@@ -358,7 +388,7 @@ def _log_pfw_proxy_standalone_mode() -> None:
     verbatim (mechanical decomposition, no behavior change)."""
     logger.info("ℹ️  Standalone mode: Using local FPD proxy (always-on)")
     logger.info("   💡 Install USPTO PFW MCP for enhanced features:")
-    logger.info("      - Persistent download links (7-day encrypted URLs)")
+    logger.info("      - Persistent download links (encrypted URLs, 1 day by default)")
     logger.info("      - Centralized proxy (unified rate limiting)")
     logger.info("      - Cross-MCP document sharing and caching")
     logger.info("   📦 Get it at: https://github.com/john-walkoe/uspto_pfw_mcp")
@@ -512,6 +542,16 @@ def _run_http_transport() -> None:
     mcp = get_server()
     _AUTH_PROVIDER = get_auth_provider()
 
+    # CR-02 (review 2026-09-28): behind a reverse proxy with no trusted-proxy
+    # CIDR declared, every OAuth and proxy rate limiter keys on the proxy's
+    # own address — one bucket for every caller.
+    if _AUTH_PROVIDER is not None and not trusted_proxy_networks():
+        logger.warning(
+            "FPD_AUTH_MODE=oauth with FPD_TRUSTED_PROXY_IPS unset: OAuth "
+            "rate limits key on the reverse proxy and act as ONE global "
+            "bucket for every caller"
+        )
+
     # Fail fast if INTERNAL_AUTH_SECRET is missing — open-access HTTP is a
     # misconfiguration. In STDIO mode this is fine (local process only).
     # In OAuth mode the surface is bearer-protected by FastMCP instead,
@@ -566,7 +606,7 @@ def _run_http_transport() -> None:
             # without a shared secret. Headless clients present
             # FPD_AUTH_INTERNAL_TOKEN as bearer.
             logger.warning(
-                "FPD_AUTH_MODE=oauth: x-api-key guard and probe shim "
+                f"FPD_AUTH_MODE={os.getenv('FPD_AUTH_MODE', 'none')}: x-api-key guard and probe shim "
                 "disabled; the MCP surface is protected by bearer tokens."
             )
             app: Any = SecurityHeadersMiddleware(inner)

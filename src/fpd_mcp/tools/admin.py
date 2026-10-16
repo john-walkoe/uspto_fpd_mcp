@@ -2,7 +2,15 @@
 
 Registration-gated by FPD_ENABLE_USER_MANAGEMENT (default off — matches the
 PFW/PTAB pattern / neo4j NEO4J_READ_ONLY approach). Extracted from main.py
-(mechanical decomposition, no behavior change)."""
+(mechanical decomposition, no behavior change).
+
+Owner-only (2026-10-06, PTAB's pattern): with FPD_OWNER_EMAILS set, the
+provider withholds fpd:admin from every non-owner token, so only an owner (or
+the operator's FPD_AUTH_INTERNAL_ADMIN_TOKEN) reaches this tool at all. One
+rule is restated here at the action: only an owner EMAIL may grant the
+admin role (the roster is shared across the suite, so a row written here is
+admin on every sibling that reads it). Under stdio there is no per-identity
+caller; the OS process boundary is the gate."""
 
 import os
 from typing import Any, Dict, Optional
@@ -35,7 +43,33 @@ USER_MANAGEMENT_ENABLED = (
 # provider stays free to reorganize its internals.
 _user_store = None
 
+# Set by register(): FPD_OWNER_EMAILS as the provider parsed it, or None when
+# there is no OAuth provider (stdio / plain HTTP: no per-identity caller).
+_owner_emails: Optional[frozenset] = None
+
 _EMAIL_RE = None  # compiled lazily
+
+def _caller_is_owner() -> bool:
+    """Is the caller an owner of this deployment?
+
+    True outside OAuth (no per-identity caller) and when no owner list is
+    configured (the scope gate already decided). Otherwise the caller's email
+    must be on FPD_OWNER_EMAILS.
+    """
+    if not _owner_emails:
+        return True
+    caller = (get_authenticated_identity() or "").strip().lower()
+    return caller in _owner_emails
+
+
+def _owner_grant_refusal(action: str, role: str) -> Optional[Dict[str, Any]]:
+    """The error for a non-owner granting the admin role, else None."""
+    if action in ("add", "set_role") and role == "admin" and not _caller_is_owner():
+        return format_error_response(
+            "only an owner of this deployment may grant the admin role",
+            403, generate_request_id(), authored=True,
+        )
+    return None
 
 
 def _get_user_store():
@@ -58,6 +92,9 @@ async def _execute_user_management_action(
     dict. (action == "list" matches none of the branches below and falls
     through to "", unchanged from before.) Extracted from fpd_manage_users
     (mechanical decomposition, no behavior change)."""
+    refusal = _owner_grant_refusal(action, role)
+    if refusal is not None:
+        return refusal
     if action == "add":
         if role not in ("user", "admin"):
             return format_error_response(
@@ -159,7 +196,9 @@ async def fpd_manage_users(
 
     Lists, adds, activates, deactivates, or changes the role of registered
     users. A user may sign in via Google / Microsoft only while their row is
-    active; role 'admin' additionally grants this user-management tool.
+    active; role 'admin' additionally grants this user-management tool (on a
+    deployment with an owner list, only to an owner, and only an owner may
+    grant it).
     FPD reads the shared user database hosted by PFW — changes
     here apply to PFW, PTAB, and FPD alike. Changes take effect at the
     user's next token refresh (up to 1 hour).
@@ -225,8 +264,12 @@ def register(mcp, auth_provider=None) -> None:
     other 20-odd methods, and reading `provider._users` on every call was a
     reach into another object's private state.
     """
-    global _user_store
+    global _user_store, _owner_emails
     _user_store = getattr(auth_provider, "_users", None) if auth_provider else None
+    _owner_emails = (
+        frozenset(getattr(auth_provider, "owner_emails", None) or ())
+        if auth_provider else None
+    )
     if USER_MANAGEMENT_ENABLED:
         if auth_provider is None and os.getenv("FASTMCP_TRANSPORT", "stdio") == "http":
             # Enabled on the HTTP surface without OAuth, the only protection on

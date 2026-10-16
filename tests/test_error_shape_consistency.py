@@ -131,6 +131,9 @@ async def test_an_unreadable_link_store_answers_503_not_404(tmp_path, monkeypatc
         def resolve_persistent_link(self, link_hash):
             raise cache_module.LinkCacheUnavailable("database is locked")
 
+        async def resolve_persistent_link_async(self, link_hash):
+            return self.resolve_persistent_link(link_hash)
+
     monkeypatch.setattr(cache_module, "get_link_cache", lambda: _Broken())
 
     class _Request:

@@ -13,7 +13,15 @@ IdP. This provider is the in-house bridge for two (ported from edgar_mcp via cit
 - Authorization is decided by the ``mcp_users`` table, not by the IdP: a login
   succeeds only when the verified email maps to an active row. role 'admin'
   adds the ``fpd:admin`` scope, which per-identity unhides the
-  user-management tool (see main.py).
+  user-management tool (see main.py). With ``FPD_OWNER_EMAILS`` set, only an
+  owner account can hold ``fpd:admin`` (the roster is shared across the
+  suite, so "admin" there is not by itself enough here), and the scope is
+  withheld at bearer load from tokens issued before the list was set.
+- The requested scope is honored (owner decision 2026-10-06, the pattern
+  hypergraph shipped 2026-09-28): a token carries the scopes the client asked
+  for at /authorize, intersected with what the account holds. A request
+  naming no scope gets ``fpd:user``. The claude.ai connectors request user
+  scope only, so the admin tool is managed over stdio or an owner token.
 - Access tokens are short-lived HS256 JWTs minted by this server (FastMCP's
   JWTIssuer); refresh tokens rotate on every use and re-check the user row,
   so deactivating a user takes effect at the next refresh.
@@ -107,6 +115,11 @@ _DEFAULT_REDIRECT_HOSTS = frozenset(
     }
 )
 
+# CR-01 (review 2026-09-28): a loopback redirect host is exempt from the
+# https requirement below (local dev tools legitimately redirect to plain
+# http://localhost); anything else must be https.
+_LOOPBACK_REDIRECT_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
 # Cookie binding the in-flight login transaction to the browser that is
 # actually signing in, checked at the IdP callback.
 _TXN_COOKIE = "fpd_txn"
@@ -164,11 +177,15 @@ class _RateLimitedASGIApp:
             await self._app(scope, receive, send)
             return
         client = scope.get("client")
-        # M-1: honor X-Forwarded-For only from a declared trusted proxy.
-        forwarded = dict(scope.get("headers") or {}).get(b"x-forwarded-for")
+        # M-1/CR-02: honor CF-Connecting-IP / X-Forwarded-For only from a
+        # declared trusted proxy.
+        headers = dict(scope.get("headers") or {})
+        forwarded = headers.get(b"x-forwarded-for")
+        cf_connecting_ip = headers.get(b"cf-connecting-ip")
         ip = resolve_client_ip(
             client[0] if client else None,
             forwarded.decode("latin-1") if forwarded else None,
+            cf_connecting_ip.decode("latin-1") if cf_connecting_ip else None,
         )
         if not self._limiter.allow(ip):
             # M-23: the OAuth surface's rate-limit rejections produced no
@@ -207,6 +224,9 @@ class FpdAuthorizationCode(AuthorizationCode):
     idp: str = ""
     display_name: str | None = None
     role: str = "user"
+    # What the client asked for at /authorize. Carried onto the refresh token
+    # so a later grant or demotion applies within this bound, never beyond.
+    requested_scopes: list[str] | None = None
 
 
 class FpdRefreshToken(RefreshToken):
@@ -217,6 +237,24 @@ class FpdRefreshToken(RefreshToken):
 
 def scopes_for_role(role: str) -> list[str]:
     return [SCOPE_USER, SCOPE_ADMIN] if role == "admin" else [SCOPE_USER]
+
+
+def admin_allowed_for(email: str | None, owners: frozenset[str]) -> bool:
+    """May this identity hold ``fpd:admin`` at all? Always, when no owner
+    list is configured; otherwise only an email on FPD_OWNER_EMAILS."""
+    if not owners:
+        return True
+    return (email or "").strip().lower() in owners
+
+
+def scopes_for_user(
+    role: str, email: str | None, owners: frozenset[str] = frozenset()
+) -> list[str]:
+    """The scopes the account holds: its role's, with admin withheld from a
+    non-owner when an owner list is configured."""
+    if role == "admin" and admin_allowed_for(email, owners):
+        return [SCOPE_USER, SCOPE_ADMIN]
+    return [SCOPE_USER]
 
 
 def _mask_email(email: str) -> str:
@@ -261,6 +299,7 @@ class FpdAuthProvider(OAuthProvider):
         }
         self._access_ttl = settings.auth_access_ttl
         self._refresh_ttl = settings.auth_refresh_ttl
+        self._owners: frozenset[str] = settings.owner_emails
         self._oauth_rate_limiter = _FixedWindowRateLimiter()
         # Tokens are audience-bound to the MCP resource URL; the transport
         # mounts the MCP endpoint at /mcp.
@@ -309,14 +348,47 @@ class FpdAuthProvider(OAuthProvider):
 
     # ------------------------------------------------------------ MCP clients
 
+    @property
+    def owner_emails(self) -> frozenset[str]:
+        """FPD_OWNER_EMAILS (lowercased); empty when no owner list is set."""
+        return self._owners
+
+    def _granted_scopes(
+        self, user: dict[str, Any], requested: list[str] | None
+    ) -> list[str]:
+        """Honor the requested scope: what the account holds (admin only for
+        an owner, when an owner list is set), intersected with what the client
+        asked for. A request naming no scope gets fpd:user."""
+        asked = set(requested or []) or {SCOPE_USER}
+        held = scopes_for_user(user["role"], user.get("email"), self._owners)
+        return [s for s in held if s in asked] or [SCOPE_USER]
+
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
+        # CR-01 (review 2026-09-28): the redirect-host allowlist was enforced
+        # only at registration. `oauth_clients` is shared across PFW, PTAB,
+        # FPD, hypergraph and RAG, so a row written by a sibling with a
+        # laxer (or absent) allowlist previously passed unchecked here —
+        # cache hit or a fresh store read. Re-check at use time on every
+        # path; open registration is the only bypass.
         cached = self._client_cache.get(client_id)
         if cached is not None:
-            return cached
-        payload = await self._users.get_client(client_id)
-        if payload is None:
+            client = cached
+        else:
+            payload = await self._users.get_client(client_id)
+            if payload is None:
+                return None
+            client = OAuthClientInformationFull.model_validate(payload)
+        if not self._open_registration and any(
+            not self._redirect_host_allowed(str(uri))
+            for uri in (client.redirect_uris or [])
+        ):
+            log.warning(
+                "Refusing stored OAuth client with a non-allowlisted "
+                "redirect host (client_id=%s)",
+                client_id,
+            )
+            self._client_cache.pop(client_id, None)
             return None
-        client = OAuthClientInformationFull.model_validate(payload)
         self._cache_client(client_id, client)
         return client
 
@@ -330,13 +402,21 @@ class FpdAuthProvider(OAuthProvider):
             self._client_cache.popitem(last=False)
 
     def _redirect_host_allowed(self, uri: str) -> bool:
-        host = (urlparse(uri).hostname or "").lower()
+        parsed = urlparse(uri)
+        host = (parsed.hostname or "").lower()
         if not host:
             return False
-        return any(
+        if not any(
             host == allowed or host.endswith("." + allowed)
             for allowed in self._allowed_redirect_hosts
-        )
+        ):
+            return False
+        # CR-01 (review 2026-09-28): a non-loopback redirect target must be
+        # https, so an allowlisted host cannot be used to intercept a code
+        # over plaintext.
+        if host not in _LOOPBACK_REDIRECT_HOSTS and parsed.scheme != "https":
+            return False
+        return True
 
     def _reject_unapproved_redirect_uris(
         self, client_info: OAuthClientInformationFull
@@ -412,6 +492,7 @@ class FpdAuthProvider(OAuthProvider):
             "created_at": time.time(),
             "nonce": secrets.token_urlsafe(16),
             "binding": secrets.token_urlsafe(16),
+            "requested_scopes": list(params.scopes or []),
         }
         if len(self._idps) == 1:
             # Single configured IdP: skip the chooser, but still route through
@@ -617,7 +698,7 @@ class FpdAuthProvider(OAuthProvider):
             )
 
         await self._users.record_login(email, idp)
-        scopes = scopes_for_role(user["role"])
+        scopes = self._granted_scopes(user, txn.get("requested_scopes"))
         display_name = claims.get("name") or user.get("display_name")
 
         our_code = secrets.token_urlsafe(32)
@@ -636,6 +717,7 @@ class FpdAuthProvider(OAuthProvider):
                 "idp": idp,
                 "display_name": display_name,
                 "role": user["role"],
+                "requested_scopes": txn.get("requested_scopes") or [SCOPE_USER],
             },
             ttl_seconds=_CODE_TTL_SECONDS,
         )
@@ -716,8 +798,23 @@ class FpdAuthProvider(OAuthProvider):
         if not tid or iss != f"https://login.microsoftonline.com/{tid}/v2.0":
             raise ValueError(f"unexpected Entra issuer {iss!r}")
         tenant = self._settings.auth_ms_tenant
-        if tenant not in ("organizations", "common") and tid != tenant:
-            raise ValueError(f"tenant {tid!r} not allowed")
+        if tenant not in ("organizations", "common", "consumers"):
+            if tid != tenant:
+                raise ValueError(f"tenant {tid!r} not allowed")
+        elif claims.get("xms_edov") is not True:
+            # Against a multi-tenant authority any Entra tenant on the internet
+            # can sign in, and a tenant admin can put any address in the `email`
+            # claim. The address is this server's whole authorization decision
+            # (registered users, admin grants), so it is trusted only when Entra
+            # attests it: `xms_edov` is true for a tenant-verified domain, a
+            # personal Microsoft account, a Google account, or a one-time-
+            # passcode sign-in. Ported from edgar_mcp 2026-09-06; the app
+            # registration must request the optional claim or every
+            # multi-tenant sign-in fails here.
+            raise ValueError(
+                "Entra email domain is not verified (xms_edov absent or false) "
+                "and the configured tenant is a multi-tenant authority"
+            )
 
     async def _get_jwks(self, idp: str, force: bool = False) -> jwk.KeySet:
         cached = self._jwks.get(idp)
@@ -766,6 +863,7 @@ class FpdAuthProvider(OAuthProvider):
             idp=payload["idp"],
             display_name=payload.get("display_name"),
             role=payload.get("role", "user"),
+            requested_scopes=payload.get("requested_scopes"),
         )
 
     async def exchange_authorization_code(
@@ -781,6 +879,7 @@ class FpdAuthProvider(OAuthProvider):
             idp=authorization_code.idp,
             display_name=authorization_code.display_name,
             role=authorization_code.role,
+            requested_scopes=authorization_code.requested_scopes,
         )
 
     async def _issue_tokens(
@@ -792,6 +891,7 @@ class FpdAuthProvider(OAuthProvider):
         idp: str,
         display_name: str | None,
         role: str,
+        requested_scopes: list[str] | None = None,
     ) -> OAuthToken:
         access = self._issuer.issue_access_token(
             client_id=client_id,
@@ -810,7 +910,11 @@ class FpdAuthProvider(OAuthProvider):
             refresh,
             client_id=client_id,
             email=email,
-            scopes=scopes,
+            # The refresh row carries the REQUESTED bound, so a grant or a
+            # demotion since sign-in applies at refresh within it. A code
+            # issued before 2026-10 carried none: fall back to the grant,
+            # which is at most what was asked then.
+            scopes=list(requested_scopes or scopes),
             ttl_seconds=self._refresh_ttl,
         )
         return OAuthToken(
@@ -872,10 +976,13 @@ class FpdAuthProvider(OAuthProvider):
         user = await self._users.get_user(refresh_token.email)
         if user is None or not user["active"]:
             raise TokenError("invalid_grant", "user is no longer authorized")
-        fresh_scopes = scopes_for_role(user["role"])
-        if scopes:
-            requested = set(scopes)
-            fresh_scopes = [s for s in fresh_scopes if s in requested] or [SCOPE_USER]
+        # The refresh row carries what the client requested at sign-in; the
+        # token handler passes it (or a subset the client names) here, and an
+        # empty list falls back to it. The account's CURRENT scopes are
+        # intersected with that bound, so a grant or demotion since sign-in
+        # applies now, and nothing beyond the request ever does.
+        bound = list(scopes or refresh_token.scopes or [])
+        fresh_scopes = self._granted_scopes(user, bound)
         return await self._issue_tokens(
             client_id=refresh_token.client_id,
             email=refresh_token.email,
@@ -883,6 +990,7 @@ class FpdAuthProvider(OAuthProvider):
             idp=user.get("last_login_idp") or "unknown",
             display_name=user.get("display_name"),
             role=user["role"],
+            requested_scopes=bound,
         )
 
     # -------------------------------------------------------- bearer validation
@@ -920,10 +1028,24 @@ class FpdAuthProvider(OAuthProvider):
         except Exception:  # noqa: BLE001 — malformed input must read as 401
             return None
         upstream: dict[str, Any] = payload.get("upstream_claims") or {}
+        scopes = (payload.get("scope") or "").split()
+        if SCOPE_ADMIN in scopes and not admin_allowed_for(
+            upstream.get("email"), self._owners
+        ):
+            # A token minted before FPD_OWNER_EMAILS was set (or before the
+            # account left the list) can still carry fpd:admin for up to
+            # FPD_AUTH_ACCESS_TTL. Withheld here, the one place every bearer
+            # is read, so the admin tool is hidden and refused for a non-owner
+            # at once, not at expiry.
+            scopes = [s for s in scopes if s != SCOPE_ADMIN]
+            log.warning(
+                "Admin scope withheld from a non-owner token (client %s)",
+                payload.get("client_id", ""),
+            )
         return AccessToken(
             token=token,
             client_id=payload.get("client_id", ""),
-            scopes=(payload.get("scope") or "").split(),
+            scopes=scopes,
             expires_at=payload.get("exp"),
             subject=upstream.get("email"),
             claims=upstream,
@@ -952,5 +1074,10 @@ def build_auth_provider(
         raise ValueError(
             "FPD_AUTH_JWT_SECRET must be a random string of at least 32 "
             "characters (e.g. `openssl rand -hex 32`)"
+        )
+    if not settings.owner_emails:
+        log.warning(
+            "FPD_OWNER_EMAILS is not set: every active roster admin holds "
+            "fpd:admin on this server. Set it to make admin owner-only."
         )
     return FpdAuthProvider(settings, users)

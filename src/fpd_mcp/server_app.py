@@ -27,10 +27,20 @@ from typing import Optional, Tuple
 from fastmcp import FastMCP
 from fastmcp.apps import AppConfig, ResourceCSP
 
+# ARCH-02 (review 2026-09-28): load this repo's own .env before anything
+# below reads settings. Same dual-call reasoning as _apply_fastmcp_compat
+# just below — this module can be the first one imported (a caller that
+# wants the composed server without main.py's re-export surface calls
+# get_server()/build_server() here directly) — and load_repo_env() is
+# idempotent, so calling it again from main.py costs nothing.
+from .env_bootstrap import load_repo_env
+
+load_repo_env()
+
 # FastMCP 4 / mcp-types 2 dropped extra="allow" on ToolAnnotations, which
 # silently strips `defer_loading` off every tool. Must run before any tool is
 # registered, so it belongs at the top of the composition root.
-from .fastmcp_compat import apply as _apply_fastmcp_compat
+from .fastmcp_compat import apply as _apply_fastmcp_compat  # noqa: E402
 
 _apply_fastmcp_compat()
 
@@ -48,7 +58,7 @@ from .ui import (  # noqa: E402
 
 # Server instructions for Claude Code tool search (v2.1.7+)
 SERVER_INSTRUCTIONS = """
-FPD MCP provides USPTO Final Petition Decisions data through 9 tools.
+FPD MCP provides USPTO Final Petition Decisions data through 12 tools.
 
 ALWAYS-AVAILABLE TOOLS (non-deferred, immediate access):
 1. FPD_Search_petitions_minimal - Primary petition discovery
@@ -62,6 +72,14 @@ PROGRESSIVE WORKFLOW:
 
 TOOL CATEGORIES TO SEARCH:
 - Search tools: "search petitions" (minimal/balanced tiers, by_art_unit, by_application)
+- Statistics tools: "petition statistics"
+  - FPD_get_petition_statistics: counts and grant/dismissal/denial rates for any
+    scope (petition type, art unit, technology center, dates), by type, art unit
+    or year, from USPTO's own facet counts.
+  - FPD_get_dismissal_grounds: where a scope's dismissals fall and a sample of
+    dismissal decisions to read for why (USPTO records no reason field).
+  - FPD_list_petition_types: petition type codes with USPTO's names and live
+    counts, to turn 'revival' or 'PTA' into the codes the other tools take.
 - Document tools: "document" (download, content extraction)
 - Guidance: "guidance" (sectioned workflow guidance)
 
@@ -89,12 +107,12 @@ fact.
 # =============================================================================
 # FPD_AUTH_MODE=oauth turns the HTTP surface into an OAuth 2.1 authorization
 # server + protected resource (Google + Entra ID sign-in, authorization via
-# the SQLite mcp_users table — FPD mounts the shared paid-tier file PFW
+# the SQLite mcp_users table — FPD mounts the shared file PFW
 # hosts). Ported from edgar_mcp via citations/PFW. mode "none" (default) and
 # stdio are byte-identical to pre-OAuth behavior.
 
 # Tools gated behind the fpd:admin scope in oauth mode. Everything else
-# stays fpd:user (no OCR gating — John's call).
+# stays fpd:user (no OCR gating).
 ADMIN_GATED_TOOLS = ["FPD_manage_users"]
 
 
@@ -254,7 +272,8 @@ def build_server() -> Tuple[FastMCP, Optional[object]]:
 
     @server.resource(_DOWNLOADS_URI, app=AppConfig(csp=csp))
     def downloads_view() -> str:
-        return DOWNLOADS_HTML
+        from .proxy.secure_link_cache import render_link_lifetime
+        return render_link_lifetime(DOWNLOADS_HTML)
 
     @server.resource(_USER_MANAGEMENT_URI, app=AppConfig(csp=csp))
     def user_management_view() -> str:

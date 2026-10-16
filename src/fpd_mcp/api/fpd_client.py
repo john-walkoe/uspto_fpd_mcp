@@ -6,7 +6,10 @@ Requires USPTO API key (same as Patent File Wrapper).
 """
 
 import asyncio
+import copy
+import contextlib
 import httpx
+import math
 import os
 import random
 from functools import wraps
@@ -14,17 +17,30 @@ from typing import Callable, Dict, Any, List, Optional, Tuple
 from ..shared.error_utils import (
     format_error_response,
     generate_request_id,
-    is_upstream_server_error,
     NotFoundError,
     RateLimitError,
+    RateLimitedError,
     AuthenticationError,
 )
 from ..shared.circuit_breaker import CircuitBreaker, CircuitBreakerOpenError
 from ..shared.cache import CacheManager
-from ..shared.uspto_shared_rate_limiter import get_shared_limiter
-from ..shared.uspto_hosts import USPTO_KEY_EVENT_HOOKS
+from ..shared.uspto_shared_rate_limiter import (
+    SharedLimiterTimeoutError,
+    get_shared_limiter,
+    note_429,
+)
 from ..config import api_constants
 from ..shared.unified_logging import get_logger
+from ..shared.uspto_hosts import USPTO_KEY_EVENT_HOOKS
+from ..util.deadline import (
+    MIN_ATTEMPT_SECONDS,
+    DeadlineExceeded,
+    current_deadline,
+    deadline_exceeded_response,
+    is_deadline_exceeded,
+    room_for,
+    run_within_deadline,
+)
 from ..services.document_extraction import (
     DocumentExtractionService,
     # Re-exported so existing tests that reach into this module directly
@@ -39,6 +55,12 @@ from ..services.document_extraction import (
     _mistral_daily_spend_add,  # noqa: F401
 )
 from .field_constants import FPDFields, QueryFieldNames
+from .payload_compat import (
+    FINAL_ONLY_CLAUSE,
+    backfill_page_counts,
+    normalize_response,
+    upstream_fields,
+)
 
 logger = get_logger(__name__)
 
@@ -96,28 +118,15 @@ class UpstreamFailure(Exception):
 
 
 def _backfill_wrapper_page_counts(document_bag: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Backfill the top-level pageCount field onto application file-wrapper
-    documentBag entries (used as the get_petition_by_id fallback source —
-    see _petition_documents_via_wrapper_fallback).
+    """Backfill the top-level pageCount field onto documentBag entries that
+    carry it only inside downloadOptionBag's PDF option.
 
-    FPD's own documentBag entries carry pageCount at the top level (read by
-    services/document_extraction.py's hybrid-extraction resolver), but the
-    wrapper's raw entries only carry the equivalent pageTotalQuantity nested
-    under downloadOptionBag's PDF option — verified live 2026-07-10: without
-    this, the content-extraction tool reports page_count: 0 for
-    fallback-resolved documents. Additive only; every other field is passed
-    through unchanged.
+    Verified live 2026-07-10 for the application file-wrapper bag (without
+    it the content tool reported page_count: 0), and true of the native FPD
+    bag too since the 2026-10 payload change. Additive only; the logic lives
+    in api/payload_compat.backfill_page_counts.
     """
-    for doc in document_bag:
-        if doc.get(FPDFields.PAGE_COUNT):
-            continue
-        for option in doc.get(FPDFields.DOWNLOAD_OPTION_BAG, []):
-            if option.get(FPDFields.MIME_TYPE_IDENTIFIER) == "PDF":
-                page_total = option.get(FPDFields.PAGE_TOTAL_QUANTITY)
-                if page_total:
-                    doc[FPDFields.PAGE_COUNT] = page_total
-                break
-    return document_bag
+    return backfill_page_counts(document_bag)
 
 
 def _retry_after_seconds(exc: Exception, default: float = 0.0) -> float:
@@ -135,6 +144,92 @@ def _retry_after_seconds(exc: Exception, default: float = 0.0) -> float:
         return max(0.0, float(response.headers.get("Retry-After", default)))
     except (TypeError, ValueError):
         return default
+
+
+# The 429 rule,
+# shared by every ODP call site in this client. On a 429: note it on the
+# shared key cooldown, then wait max(5 s, Retry-After) and send ONCE more,
+# but only when that wait is at most RATE_LIMIT_ABSORB_CEILING_SECONDS and
+# fits what is left of the call's time budget (util/deadline.py); otherwise
+# answer with the rate-limit envelope and let the caller retry after
+# `retry_after_seconds`. Never a second retry. 5 s is USPTO's own published
+# floor ("no retry without at least a 5 s delay"), so absorbing a 429 with no
+# Retry-After is not sleeping blind. The wait holds no shared slot and no
+# bulkhead slot: _send_once released both when the response came back.
+RATE_LIMIT_WAIT_FLOOR_SECONDS = 5.0
+RATE_LIMIT_ABSORB_CEILING_SECONDS = 10.0
+
+#: `rate_limit_source` values: USPTO's own 429 versus this deployment's
+#: shared cross-process limiter refusing to wait any longer.
+RATE_LIMIT_SOURCE_UPSTREAM = "uspto_api"
+RATE_LIMIT_SOURCE_SHARED_LIMITER = "shared_uspto_limiter"
+
+
+def retry_after_seconds(response) -> Optional[float]:
+    """The Retry-After header as seconds, or None when absent or not a
+    number (the HTTP-date form is not used by ODP and is treated as absent)."""
+    raw = response.headers.get("Retry-After") if response is not None else None
+    if raw is None:
+        return None
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+    return value if value >= 0 else None
+
+
+def planned_429_wait(
+    retry_after: Optional[float], already_retried: bool, remaining_budget: float
+) -> Optional[float]:
+    """Seconds to wait before the single 429 retry, or None for "answer with
+    the envelope now". Pure so the rule is testable without a network."""
+    if already_retried:
+        return None
+    wait = max(RATE_LIMIT_WAIT_FLOOR_SECONDS, retry_after or 0.0)
+    if wait > RATE_LIMIT_ABSORB_CEILING_SECONDS or wait > remaining_budget:
+        return None
+    return wait
+
+
+def remaining_429_budget() -> float:
+    """Seconds the running call can still spend on the single 429 wait and
+    leave room for the retry itself (util/deadline.py); unbounded outside a
+    call with a time budget."""
+    deadline = current_deadline()
+    if deadline is None:
+        return math.inf
+    return max(0.0, deadline.remaining() - MIN_ATTEMPT_SECONDS)
+
+
+def rate_limited_envelope(
+    retry_after: Optional[float],
+    source: str,
+    request_id: Optional[str] = None,
+    response=None,
+) -> Dict[str, Any]:
+    """The structured answer to a call refused for pacing. `rate_limited`
+    is the key a caller branches on; `retry_after_seconds` is always a
+    number and never below USPTO's 5 s floor. `retry_after` (whole seconds)
+    is the key the earlier 429 envelope carried and is kept in step."""
+    wait = max(RATE_LIMIT_WAIT_FLOOR_SECONDS, retry_after or 0.0)
+    if response is not None:
+        try:
+            detail = response.text
+        except httpx.StreamError:  # a streamed body never read
+            detail = ""
+        envelope = format_error_response(f"API error: {detail}", 429, request_id)
+    else:
+        envelope = format_error_response(
+            f"Rate limited. Retry this call once in {wait:.0f} seconds.",
+            429,
+            request_id,
+            authored=True,
+        )
+    envelope["rate_limited"] = True
+    envelope["retry_after"] = int(math.ceil(wait))
+    envelope["retry_after_seconds"] = round(float(wait), 2)
+    envelope["rate_limit_source"] = source
+    return envelope
 
 
 def _client_method_error_handler(method_name: str) -> Callable:
@@ -177,7 +272,11 @@ class FPDClient:
     RETRY_ATTEMPTS = 3
     RETRY_DELAY = 1.0  # Base delay in seconds
     RETRY_BACKOFF = 2  # Exponential backoff multiplier
-    RETRY_429_DELAY = 5.0  # Fixed cool-down for 429s (USPTO's documented etiquette)
+    # The floor on the single 429 wait (USPTO's documented etiquette); the
+    # rule itself is planned_429_wait / _absorb_429. The earlier
+    # 30 s MAX_RETRY_AFTER_SECONDS sleep cap is gone: a Retry-After over the
+    # 10 s absorb ceiling is answered with the envelope, not slept on.
+    RETRY_429_DELAY = RATE_LIMIT_WAIT_FLOOR_SECONDS
 
     def __init__(self, api_key: Optional[str] = None):
         """Initialize FPD client with USPTO API key"""
@@ -340,30 +439,22 @@ class FPDClient:
         self, e: httpx.HTTPStatusError, request_id: str
     ) -> Optional[Dict[str, Any]]:
         """Return a terminal error response for a non-retryable 4xx status,
-        or None if the error is retryable (429, or any 5xx). Extracted from
-        _execute_request_with_retries's except block to keep its cyclomatic
-        complexity under the ruff C901 gate (mechanical decomposition, no
-        behavior change)."""
+        or None if the error is retryable (any 5xx). A 429 never reaches
+        this: _on_http_status_error applies the 429 rule first. Extracted
+        from _execute_request_with_retries's except block to keep its
+        cyclomatic complexity under the ruff C901 gate."""
         status = e.response.status_code
-        if status == 429 or status >= 500:
+        if status >= 500:
             return None
         # Don't retry authentication errors or other client errors (4xx)
         logger.error(f"[{request_id}] API error {status}")
         return self._map_http_status_error_response(e, request_id)
 
     def _compute_retry_delay(self, attempt: int, last_exception: Optional[Exception]) -> float:
-        """Delay before the next retry attempt: a fixed cool-down for 429s
-        (USPTO's documented etiquette), exponential backoff + jitter
-        otherwise. Extracted from _execute_request_with_retries's retry loop
-        to keep its cyclomatic complexity under the ruff C901 gate
-        (mechanical decomposition, no behavior change)."""
-        if isinstance(last_exception, httpx.HTTPStatusError) and last_exception.response.status_code == 429:
-            # F-R3: the upstream told us how long to wait and both the retry
-            # loop and the 429 envelope threw it away — this returned the
-            # fixed 5s cool-down for every 429, so a throttle asking for 60s
-            # produced three rejected calls where one correctly-timed retry
-            # would have succeeded. The cool-down is now the FLOOR.
-            return max(self.RETRY_429_DELAY, _retry_after_seconds(last_exception))
+        """Delay before the next retry attempt on a 5xx or a transport
+        failure: exponential backoff + jitter. A 429 never comes through
+        here since the rate-limit wave: its single wait is
+        planned_429_wait's, applied by _absorb_429."""
         delay = self.RETRY_DELAY * (self.RETRY_BACKOFF ** attempt)
         jitter = random.uniform(0.1, 0.5)
         return delay + jitter
@@ -379,17 +470,28 @@ class FPDClient:
         acquire per ATTEMPT — off unless USPTO_SHARED_RATE_LIMIT_DIR is set.
         This is the single choke point around the actual outbound USPTO HTTP
         send.
+
+        Inside a call with a time budget (util/deadline.py: the content tool,
+        petition details with documents) the attempt, limiter wait included,
+        runs only on what is left of it and raises DeadlineExceeded when cut.
         """
         limiter = get_shared_limiter()
         client = self._get_http_client()
-        if method.upper() == "POST":
-            send = client.post(url, headers=self.headers, **kwargs)
-        else:
-            send = client.get(url, headers=self.headers, **kwargs)
-        if limiter is not None:
-            async with limiter:
+
+        async def attempt() -> "httpx.Response":
+            # S62: the bulkhead slot is held for the send only, never across
+            # a retry wait, so a throttled request does not starve the rest.
+            async with self.uspto_semaphore:
+                if method.upper() == "POST":
+                    send = client.post(url, headers=self.headers, **kwargs)
+                else:
+                    send = client.get(url, headers=self.headers, **kwargs)
+                if limiter is not None:
+                    async with limiter:
+                        return await send
                 return await send
-        return await send
+
+        return await run_within_deadline(attempt)
 
     def _get_http_client(self) -> "httpx.AsyncClient":
         """The one httpx client this FPDClient sends through.
@@ -403,12 +505,17 @@ class FPDClient:
         Created lazily rather than in __init__ so the tests that patch
         `fpd_client_module.httpx.AsyncClient` before the first request still
         get their MockTransport.
+
+        The key event hook (shared/uspto_hosts.py) strips the key off any
+        non-uspto.gov hop: every petition search, details and file-wrapper
+        request passes through here.
         """
         if self._http_client is None:
             self._http_client = httpx.AsyncClient(
                 timeout=self.default_timeout,
                 verify=True,
                 limits=self.connection_limits,
+                event_hooks=USPTO_KEY_EVENT_HOOKS,
             )
         return self._http_client
 
@@ -421,63 +528,130 @@ class FPDClient:
             except Exception as e:  # pragma: no cover - shutdown path
                 logger.debug(f"HTTP client close failed: {type(e).__name__}")
 
+    async def _wait_before_retry(
+        self, attempt: int, last_exception: Optional[Exception], request_id: str
+    ) -> bool:
+        """Sleep the retry delay and return True, or return False without
+        sleeping when this was the last attempt, or when the call's time
+        budget (util/deadline.py) would not leave room for another attempt
+        after the wait: the last status is then the answer. Extracted from
+        _execute_request_with_retries to keep it under the complexity gate."""
+        if attempt >= self.RETRY_ATTEMPTS - 1:
+            return False
+        total_delay = self._compute_retry_delay(attempt, last_exception)
+        if not room_for(total_delay):
+            logger.warning(
+                f"[{request_id}] Not retrying: a {total_delay:.2f}s wait would "
+                "leave no room in the call's time budget"
+            )
+            return False
+        logger.warning(
+            f"[{request_id}] Request failed on attempt {attempt + 1}/{self.RETRY_ATTEMPTS}, "
+            f"retrying in {total_delay:.2f}s: {str(last_exception)}"
+        )
+        await asyncio.sleep(total_delay)
+        return True
+
+    async def _absorb_429(
+        self, response, already_retried: bool, request_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Apply the 429 rule to one 429 response: note it on the
+        shared key cooldown, then either sleep the single allowed wait and
+        return None (the caller sends once more) or return the rate-limit
+        envelope. No shared slot and no bulkhead slot is held here: the send
+        that saw the 429 released both when the response came back."""
+        retry_after = retry_after_seconds(response)
+        note_429(retry_after)
+        wait = planned_429_wait(retry_after, already_retried, remaining_429_budget())
+        if wait is None:
+            logger.error(f"[{request_id}] API error 429, answering with the envelope")
+            return rate_limited_envelope(
+                retry_after, RATE_LIMIT_SOURCE_UPSTREAM, request_id, response=response
+            )
+        logger.warning(f"[{request_id}] API error 429, one retry in {wait:.0f}s")
+        await asyncio.sleep(wait)
+        return None
+
+    async def _on_http_status_error(
+        self, e: httpx.HTTPStatusError, retried_429: bool, request_id: str
+    ) -> Tuple[Optional[Dict[str, Any]], bool]:
+        """One HTTPStatusError inside the attempt loop: (terminal envelope or
+        None, send once more right now). A 429 goes through the 429 rule;
+        any other 4xx is terminal; a 5xx is left to the backoff retry."""
+        if e.response.status_code == 429:
+            envelope = await self._absorb_429(e.response, retried_429, request_id)
+            return envelope, envelope is None
+        return self._http_status_error_terminal_response(e, request_id), False
+
     async def _execute_request_with_retries(
         self, method: str, url: str, request_id: str, **kwargs
     ) -> Dict[str, Any]:
-        """Retry loop for a single logical request, bounded by the
-        USPTO-specific semaphore. Extracted out of _make_request into its
-        own method (rather than a nested closure) so its branches are no
-        longer counted toward _make_request's cyclomatic complexity —
-        mechanical decomposition, no behavior change."""
-        async with self.uspto_semaphore:
-            last_exception = None
+        """Retry loop for a single logical request: up to RETRY_ATTEMPTS
+        sends with exponential backoff on a 5xx, a timeout or a transport
+        failure, the single 429 retry (which spends no attempt), and
+        an immediate envelope on any other 4xx. Extracted out of
+        _make_request so its branches are not counted toward _make_request's
+        cyclomatic complexity.
 
-            for attempt in range(self.RETRY_ATTEMPTS):
-                try:
-                    response = await self._send_once(method, url, **kwargs)
-                    response.raise_for_status()
-                    logger.info(f"[{request_id}] Request successful on attempt {attempt + 1}")
-                    return response.json()
+        The shared limiter's refusal (SharedLimiterTimeoutError, a
+        TimeoutError: no slot inside USPTO_SHARED_MAX_WAIT_SECONDS) is
+        answered at once with the rate-limit envelope and never retried: a
+        retry would only queue again behind the same backlog. Returned, not
+        raised, so the circuit breaker does not read local pacing as an
+        upstream outage.
 
-                except httpx.HTTPStatusError as e:
-                    # 429 is retryable (fixed cool-down — see
-                    # _compute_retry_delay) and so is any 5xx; other 4xx
-                    # (auth errors, bad requests, etc.) are not.
-                    terminal = self._http_status_error_terminal_response(e, request_id)
-                    if terminal is not None:
-                        return terminal
-                    last_exception = e
+        The USPTO bulkhead (uspto_semaphore) is taken per attempt inside
+        _send_once, so the slot is free while the loop waits to retry (S62)."""
+        last_exception = None
+        retried_429 = False
+        attempt = 0
 
-                except httpx.TimeoutException as e:
-                    last_exception = e
+        while attempt < self.RETRY_ATTEMPTS:
+            try:
+                response = await self._send_once(method, url, **kwargs)
+                response.raise_for_status()
+                logger.info(f"[{request_id}] Request successful on attempt {attempt + 1}")
+                return response.json()
 
-                except Exception as e:
-                    # Don't retry unexpected errors on final attempt
-                    if attempt == self.RETRY_ATTEMPTS - 1:
-                        logger.error(f"[{request_id}] Request failed: {str(e)}")
-                        raise UpstreamFailure(format_error_response(
-                            f"Request failed: {str(e)}",
-                            500,
-                            request_id
-                        ))
-                    last_exception = e
+            except DeadlineExceeded:
+                # The CALL's budget ran out (util/deadline.py), not the
+                # upstream: returned like a 4xx, so the breaker does not
+                # count it as an outage.
+                logger.warning(f"[{request_id}] Stopped at the call's time budget")
+                return deadline_exceeded_response(request_id)
 
-                # Calculate delay: fixed cool-down for 429s, exponential
-                # backoff + jitter otherwise (see _compute_retry_delay).
-                if attempt < self.RETRY_ATTEMPTS - 1:
-                    total_delay = self._compute_retry_delay(attempt, last_exception)
+            except SharedLimiterTimeoutError as e:
+                logger.warning(f"[{request_id}] shared limiter refusal: {e}")
+                return rate_limited_envelope(None, RATE_LIMIT_SOURCE_SHARED_LIMITER, request_id)
 
-                    logger.warning(
-                        f"[{request_id}] Request failed on attempt {attempt + 1}/{self.RETRY_ATTEMPTS}, "
-                        f"retrying in {total_delay:.2f}s: {str(last_exception)}"
-                    )
-                    await asyncio.sleep(total_delay)
+            except httpx.HTTPStatusError as e:
+                terminal, send_again = await self._on_http_status_error(
+                    e, retried_429, request_id
+                )
+                if terminal is not None:
+                    return terminal
+                if send_again:
+                    retried_429 = True
+                    continue  # the one 429 retry does not spend an attempt
+                last_exception = e
 
-            # All retries failed. RAISE so the circuit breaker records the
-            # failure; _make_request converts it back into the same envelope.
-            raise UpstreamFailure(
-                self._build_retry_exhausted_response(last_exception, request_id)
-            )
+            except Exception as e:
+                # A timeout, a transport failure or anything unexpected:
+                # retried with backoff; after the last attempt the exhausted
+                # envelope below carries it (408 for a timeout, else 500).
+                last_exception = e
+
+            # Exponential backoff + jitter (see _compute_retry_delay), or
+            # stop when this was the last attempt or the wait would not fit.
+            if not await self._wait_before_retry(attempt, last_exception, request_id):
+                break
+            attempt += 1
+
+        # All retries failed. RAISE so the circuit breaker records the
+        # failure; _make_request converts it back into the same envelope.
+        raise UpstreamFailure(
+            self._build_retry_exhausted_response(last_exception, request_id)
+        )
 
     async def _make_request(
         self,
@@ -508,7 +682,11 @@ class FPDClient:
             # Cache successful responses for circuit breaker fallback
             if result and not result.get("error"):
                 cache_key = f"{method}_{endpoint}"
-                self.cache_manager.set(cache_key, result, **kwargs)
+                # S61: a copy, never the object handed back to the caller.
+                # get_petition_by_id trims the documentBag and the record list
+                # of the result in place; caching the same object let that
+                # trim hollow out the fallback a later caller would be served.
+                self.cache_manager.set(cache_key, copy.deepcopy(result), **kwargs)
                 logger.debug(f"[{request_id}] Cached response for {cache_key}")
 
             return result
@@ -542,7 +720,9 @@ class FPDClient:
                 logger.info(f"[{request_id}] Serving stale cached response (circuit OPEN)")
 
                 # Add metadata to indicate cached/degraded response
-                cached_result = cached_result.copy()  # Don't modify original cached data
+                # S61: a deep copy, so this caller's trims never reach the
+                # cached original (a shallow copy shared the nested bags).
+                cached_result = copy.deepcopy(cached_result)
                 cached_result["_cached"] = True
                 cached_result["_circuit_open"] = True
                 cached_result["_warning"] = "Serving cached data - USPTO API temporarily unavailable"
@@ -570,11 +750,18 @@ class FPDClient:
         offset: int = 0,
         limit: int = 25,
         range_filters: Optional[List[Dict]] = None,
+        facets: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         Search petition decisions using FPD API
 
         Args:
+            facets: field names to count values on, sent as the body's
+                `facets` list. The response then carries
+                `facets: {field: [{value, count}, ...]}`, each list sorted by
+                count descending and capped at 1,000 values upstream; a field
+                the endpoint does not know comes back as an empty list, not an
+                error (probed 2026-10-06, docs/PETITION-STATISTICS.md).
             query: Search query string (supports boolean operators, wildcards)
             filters: List of exact-match filter objects (`name` + `value` list)
             fields: Optional list of fields to retrieve for context reduction
@@ -619,9 +806,13 @@ class FPDClient:
         if range_filters:
             body["rangeFilters"] = range_filters
 
-        # Add fields if provided (for context reduction)
+        if facets:
+            body["facets"] = list(facets)
+
+        # Add fields if provided (for context reduction). A legacy outcome
+        # name gets its 2026-10 name beside it (api/payload_compat.py).
         if fields:
-            body["fields"] = fields
+            body["fields"] = upstream_fields(fields)
 
         # Add sort if provided
         if sort:
@@ -642,8 +833,11 @@ class FPDClient:
             f"pagination={body.get('pagination')}"
         )
 
-        # Use POST for search as per USPTO API spec
-        return await self._make_request("search", method="POST", json=body)
+        # Use POST for search as per USPTO API spec. Records are normalised
+        # to this server's representation (api/payload_compat.py).
+        return normalize_response(
+            await self._make_request("search", method="POST", json=body)
+        )
 
     @_client_method_error_handler("get_petition_by_id")
     async def get_petition_by_id(
@@ -661,93 +855,128 @@ class FPDClient:
         Returns:
             Dict containing petition details
 
-        Fallback (verified live 2026-07-10): USPTO's petition-details
-        endpoint 500s upstream for includeDocuments=true (broken since at
-        least 2026-07-04); `include_documents=False` works fine. When the
-        with-documents call comes back as a 5xx-class error envelope, this
-        transparently retries without documents and reconstructs documentBag
-        from the application file-wrapper documents endpoint (FPD documentBag
-        identifiers are also application file-wrapper document identifiers —
-        verified live). Non-5xx errors (404/401/etc.) are returned unchanged.
+        2026-10 payload change (probed live 2026-10-05, see
+        docs/UPSTREAM-FPD-API-CHANGE-2026-10.md): the plain details call
+        now carries the petition's own documentBag (the decision papers,
+        with download options), so includeDocuments is NOT sent. Sending
+        includeDocuments=true now answers 200 with the first page of the
+        WHOLE corpus (count ~1.1 million, 25 unrelated records), which made
+        every download and every details-with-documents call read some other
+        petition's bag; before 2026-10 the same call answered HTTP 500.
+
+        The response is narrowed to the record whose identifier is the one
+        asked for, so an upstream that answers with a list can never hand
+        back a different petition. include_documents=False drops the bag;
+        include_documents=True keeps it, and only a petition whose own bag is
+        empty falls back to the application file wrapper.
         """
-        # Build query parameters
-        params = {}
-        if include_documents:
-            params["includeDocuments"] = "true"
+        result = await self._make_request(f"{petition_id}", method="GET")
+        if "error" in result:
+            return result
 
-        # Make GET request to specific petition endpoint
-        result = await self._make_request(
-            f"{petition_id}",
-            method="GET",
-            params=params
-        )
+        records = result.get(FPDFields.PETITION_DECISION_DATA_BAG)
+        if isinstance(records, list) and records:
+            matching = [
+                r for r in records
+                if isinstance(r, dict)
+                and r.get(FPDFields.PETITION_DECISION_RECORD_IDENTIFIER) == petition_id
+            ]
+            if not matching:
+                logger.warning(
+                    "Petition-details response did not contain the requested "
+                    f"petition ({len(records)} other record(s)); answering 404"
+                )
+                return format_error_response(
+                    f"Petition {petition_id} not found (the upstream answer did "
+                    "not contain this petition)",
+                    404,
+                    generate_request_id(),
+                )
+            result[FPDFields.PETITION_DECISION_DATA_BAG] = matching[:1]
+            if isinstance(result.get("count"), int):
+                result["count"] = 1
 
-        if include_documents and is_upstream_server_error(result):
-            return await self._petition_documents_via_wrapper_fallback(petition_id)
+        normalize_response(result)
 
-        return result
+        records = result.get(FPDFields.PETITION_DECISION_DATA_BAG) or []
+        if not include_documents:
+            for record in records:
+                if isinstance(record, dict):
+                    record.pop(FPDFields.DOCUMENT_BAG, None)
+            return result
+
+        if records and isinstance(records[0], dict) and records[0].get(FPDFields.DOCUMENT_BAG):
+            result["document_metadata_available"] = True
+            result["document_metadata_source"] = "petition_record"
+            result["document_metadata_note"] = (
+                "documentBag is this petition's own document list as USPTO "
+                "serves it on the petition record (the decision and any papers "
+                "filed or issued with it), not the application's file wrapper."
+            )
+            return result
+
+        return await self._petition_documents_via_wrapper_fallback(result)
 
     async def _petition_documents_via_wrapper_fallback(
-        self, petition_id: str
+        self, petition_result: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Reconstruct documentBag from the application file-wrapper
-        documents endpoint after the primary includeDocuments=true call
-        failed upstream (see get_petition_by_id docstring). Degrades
-        gracefully to the plain without-documents result (still correct,
-        just without documentBag) if either the without-documents retry or
-        the wrapper fetch itself also fails.
+        documents endpoint for a petition whose own documentBag is empty or
+        absent (see get_petition_by_id docstring). Degrades gracefully to the
+        petition without a documentBag if the wrapper fetch itself fails.
 
-        A degraded result is ALWAYS marked. Previously the explanatory note
-        was withheld on the failure paths, so the caller received a petition
-        with documentBag entirely absent — indistinguishable from a petition
-        that genuinely has no documents. No existing key is ever altered;
-        only the additive document_metadata_* keys are set.
+        A degraded result is ALWAYS marked: an absent documentBag must never
+        be indistinguishable from a petition that genuinely has no documents.
+        No existing key is ever altered; only the additive
+        document_metadata_* keys are set.
         """
-        without_docs = await self.get_petition_by_id(petition_id, include_documents=False)
-        if "error" in without_docs:
-            return without_docs
-
-        petition_data = without_docs.get(FPDFields.PETITION_DECISION_DATA_BAG, [])
+        petition_data = petition_result.get(FPDFields.PETITION_DECISION_DATA_BAG, [])
         if not petition_data:
-            return without_docs
+            return petition_result
 
         application_number = petition_data[0].get(FPDFields.APPLICATION_NUMBER_TEXT)
         if not application_number:
             return self._mark_document_metadata_unavailable(
-                without_docs,
-                "no application number on the petition record to look documents up by",
+                petition_result,
+                "the petition record carries no documentBag and no application "
+                "number to look documents up by",
             )
 
         wrapper_result = await self.get_application_documents(application_number)
+        if is_deadline_exceeded(wrapper_result):
+            # The call's time budget ran out, which says nothing about the
+            # petition's documents: say so rather than "metadata unavailable".
+            return wrapper_result
         if "error" in wrapper_result:
             logger.warning(
-                "Document-bag wrapper fallback also failed for application "
+                "Document-bag wrapper fallback failed for application "
                 f"{application_number}; returning petition details without documents"
             )
             return self._mark_document_metadata_unavailable(
-                without_docs,
-                "the application file-wrapper documents endpoint also failed",
+                petition_result,
+                "the petition record carries no documentBag and the application "
+                "file-wrapper documents endpoint also failed",
             )
 
         petition_data[0][FPDFields.DOCUMENT_BAG] = _backfill_wrapper_page_counts(
             wrapper_result.get(FPDFields.DOCUMENT_BAG, [])
         )
-        without_docs["document_metadata_available"] = True
-        without_docs["document_metadata_source"] = "application_file_wrapper_fallback"
-        without_docs["document_metadata_note"] = (
+        petition_result["document_metadata_available"] = True
+        petition_result["document_metadata_source"] = "application_file_wrapper_fallback"
+        petition_result["document_metadata_note"] = (
             "THIS documentBag IS THE APPLICATION'S FILE WRAPPER, NOT A "
-            "PETITION BAG. USPTO's petition-details includeDocuments=true "
-            "endpoint answers HTTP 500 (still erroring when last observed on "
-            "2026-09-03), so the bag was reconstructed from the application "
-            "file wrapper instead. It lists the WHOLE prosecution history of "
-            "the application (office actions, claims, specification, IDS, "
-            "892/1449 forms, abandonment notices), not only the papers filed "
-            "with or issued on this petition, and it would be identical on "
-            "every petition of the same application. Filter it before "
-            "describing it as this petition's documents: the petition papers "
-            "are the PET/PETDEC/PPH.DECISION-style entries within it."
+            "PETITION BAG. USPTO served this petition record with no "
+            "documentBag of its own, so the bag was reconstructed from the "
+            "application file wrapper instead. It lists the WHOLE prosecution "
+            "history of the application (office actions, claims, "
+            "specification, IDS, 892/1449 forms, abandonment notices), not "
+            "only the papers filed with or issued on this petition, and it "
+            "would be identical on every petition of the same application. "
+            "Filter it before describing it as this petition's documents: the "
+            "petition papers are the PET/PETDEC/PPH.DECISION-style entries "
+            "within it."
         )
-        return without_docs
+        return petition_result
 
     @staticmethod
     def _mark_document_metadata_unavailable(
@@ -759,8 +988,7 @@ class FPDClient:
         result["document_metadata_source"] = "unavailable"
         result["document_metadata_note"] = (
             "documentBag could NOT be retrieved for this petition "
-            f"({reason}); USPTO's petition-details includeDocuments=true "
-            "endpoint is erroring upstream. An absent documentBag here means "
+            f"({reason}). An absent documentBag here means "
             "'metadata unavailable', NOT 'this petition has no documents'. "
             "Retry later, or use FPD_get_document_download with a "
             "documentIdentifier obtained elsewhere."
@@ -797,6 +1025,7 @@ class FPDClient:
         date_range: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
+        final_only: bool = False,
     ) -> Dict[str, Any]:
         """
         Search petitions by art unit number
@@ -806,6 +1035,7 @@ class FPDClient:
             date_range: Optional date range filter (e.g., "2020-01-01:2024-12-31")
             limit: Maximum number of results
             offset: Starting position, for paging past `limit`
+            final_only: AND `finalPetitionDecisionIndicator:true` into the query
 
         Returns:
             Dict containing search results
@@ -821,6 +1051,8 @@ class FPDClient:
         """
         # Build query
         query = f"{QueryFieldNames.ART_UNIT}:{art_unit}"
+        if final_only:
+            query = f"{query} AND {FINAL_ONLY_CLAUSE}"
 
         # Build range filters for date range if provided
         range_filters = []
@@ -849,6 +1081,7 @@ class FPDClient:
         limit: int = 100,
         offset: int = 0,
         fields: Optional[List[str]] = None,
+        final_only: bool = False,
     ) -> Dict[str, Any]:
         """
         Search petitions for specific application number
@@ -862,6 +1095,7 @@ class FPDClient:
             offset: Starting position, for paging past `limit`
             fields: Field projection to request. `None` asks USPTO for the
                 full record.
+            final_only: AND `finalPetitionDecisionIndicator:true` into the query
 
         D-3 (code-duplication-detection): this method used to carry its own
         16-element field list, a fourth copy of the petition field sets that
@@ -875,6 +1109,8 @@ class FPDClient:
         """
         # Build query
         query = f"{QueryFieldNames.APPLICATION_NUMBER}:{application_number}"
+        if final_only:
+            query = f"{query} AND {FINAL_ONLY_CLAUSE}"
 
         result = await self.search_petitions(
             query=query,
@@ -893,26 +1129,36 @@ class FPDClient:
     async def _attach_documents_to_search_hits(
         self, result: Dict[str, Any], application_number: str
     ) -> Dict[str, Any]:
-        """Give every petition in a by-application search hit a documentBag.
+        """Make sure every petition in a by-application search hit has a
+        documentBag, and say where each bag came from.
 
-        The search endpoint has no `includeDocuments` switch at all — asking
-        for the unfiltered record simply returns the petition fields without a
-        documentBag — so `include_documents=True` on
-        FPD_Search_petitions_by_application was a documented no-op until
-        2026-08-30. This attaches the SAME bag get_petition_by_id currently
-        serves: USPTO's petition-details includeDocuments=true endpoint has
-        been 500-ing since at least 2026-07-04, so that path also falls back to
-        the application file wrapper (see
-        _petition_documents_via_wrapper_fallback). Every petition in this
-        result set is on the SAME application by construction, so one wrapper
-        fetch covers the whole page rather than one call per record.
-
-        The substitution is labelled with the same document_metadata_* keys
-        the details path uses; a failure is labelled too, never left as an
-        absent bag that reads as "this petition has no documents".
+        Since the 2026-10 payload change the search endpoint serves each
+        petition's own documentBag natively (asking for the unfiltered record
+        returns it), so normally nothing is fetched here and the result is
+        labelled `document_metadata_source: "petition_record"`. Only records
+        whose own bag is empty get the APPLICATION FILE WRAPPER grafted on,
+        from ONE wrapper fetch for the page (every hit is on the same
+        application by construction), and each grafted record is marked
+        `document_bag_source: "application_file_wrapper"`. A failed wrapper
+        fetch is labelled too, never left as an absent bag that reads as
+        "this petition has no documents".
         """
         records = result.get(FPDFields.PETITION_DECISION_DATA_BAG)
         if not isinstance(records, list) or not records:
+            return result
+
+        bare = [
+            record for record in records
+            if isinstance(record, dict) and not record.get(FPDFields.DOCUMENT_BAG)
+        ]
+        if not bare:
+            result["document_metadata_available"] = True
+            result["document_metadata_source"] = "petition_record"
+            result["document_metadata_note"] = (
+                "Each documentBag is that petition's own document list as USPTO "
+                "serves it on the petition record (the decision and any papers "
+                "filed or issued with it), not the application's file wrapper."
+            )
             return result
 
         wrapper_result = await self.get_application_documents(application_number)
@@ -923,30 +1169,37 @@ class FPDClient:
             )
             return self._mark_document_metadata_unavailable(
                 result,
-                "the application file-wrapper documents endpoint failed",
+                "a petition record carried no documentBag and the application "
+                "file-wrapper documents endpoint failed",
             )
 
         document_bag = _backfill_wrapper_page_counts(
             wrapper_result.get(FPDFields.DOCUMENT_BAG, [])
         )
-        for record in records:
-            if isinstance(record, dict):
-                record[FPDFields.DOCUMENT_BAG] = document_bag
+        for record in bare:
+            record[FPDFields.DOCUMENT_BAG] = document_bag
+            record["document_bag_source"] = "application_file_wrapper"
 
-        result["document_metadata_available"] = True
-        result["document_metadata_source"] = "application_file_wrapper"
-        result["document_metadata_note"] = (
+        wrapper_note = (
             "THIS documentBag IS THE APPLICATION'S FILE WRAPPER, NOT A "
-            "PETITION BAG. The FPD search endpoint serves no documentBag of "
-            "its own, and USPTO's petition-details includeDocuments=true "
-            "endpoint answers HTTP 500 (still erroring when last observed on "
-            "2026-09-03), so the bag was taken from the APPLICATION FILE "
-            "WRAPPER, the same source FPD_Get_petition_details serves today. "
-            "It is the application's whole prosecution history (office "
-            "actions, claims, IDS, ...), not only the petition papers, and it "
-            "is identical on every petition of this application. Filter it "
-            "before describing it as this petition's documents."
+            "PETITION BAG, on every record marked document_bag_source: "
+            "\"application_file_wrapper\". USPTO served those petition records "
+            "with no documentBag of their own, so the bag was taken from the "
+            "APPLICATION FILE WRAPPER: the application's whole prosecution "
+            "history (office actions, claims, IDS, ...), not only the petition "
+            "papers, identical on every such record. Filter it before "
+            "describing it as one petition's documents."
         )
+        result["document_metadata_available"] = True
+        if len(bare) == len(records):
+            result["document_metadata_source"] = "application_file_wrapper"
+            result["document_metadata_note"] = wrapper_note
+        else:
+            result["document_metadata_source"] = "mixed"
+            result["document_metadata_note"] = (
+                "Records without a document_bag_source key carry their own "
+                "petition documentBag. " + wrapper_note
+            )
         return result
 
     async def _download_pdf_for_extraction(self, download_url: str) -> bytes:
@@ -965,8 +1218,65 @@ class FPDClient:
         M-18: held under `_extraction_slots` so the process-wide memory
         ceiling is `_MAX_PDF_BYTES x _MAX_CONCURRENT_EXTRACTIONS` rather than
         `_MAX_PDF_BYTES x however many calls are in flight`.
+
+        the fetch goes through the shared cross-process ODP rate
+        limiter (off unless USPTO_SHARED_RATE_LIMIT_DIR is set), the same one
+        `_send_once` and the download proxy use. The slot is held for the
+        whole body read, not just connection setup: the body IS the USPTO
+        traffic (USPTO's burst=1 guidance).
+
+        Inside the content tool the whole fetch, slot waits included, runs on
+        what is left of the call's time budget (util/deadline.py) and raises
+        DeadlineExceeded when cut.
         """
-        async with _extraction_slots, httpx.AsyncClient(
+        return await run_within_deadline(
+            lambda: self._download_pdf_capped(download_url)
+        )
+
+    async def _download_variant_for_extraction(self, download_url: str) -> bytes:
+        """A free-text variant (.docx or xmlarchive) of a petition document,
+        fetched exactly like the PDF in _download_pdf_for_extraction (key
+        hooks, extraction slot, shared ODP limiter, byte cap, call deadline)
+        but without the PDF magic-byte check, since it is not a PDF."""
+        return await run_within_deadline(
+            lambda: self._download_pdf_capped(download_url, require_pdf=False)
+        )
+
+    async def _download_pdf_capped(self, download_url: str, require_pdf: bool = True) -> bytes:
+        """Body of _download_pdf_for_extraction: one capped fetch under the
+        extraction slot and the shared ODP slot (_download_once), with the
+        429 rule around it: a 429 is noted on the shared key, then
+        fetched ONCE more after max(5 s, Retry-After) when that wait is at
+        most 10 s and fits the call's budget, else RateLimitedError carrying
+        the envelope. The wait holds neither slot. The shared limiter's
+        refusal is RateLimitedError at once, no retry.
+        ``require_pdf=False`` skips the magic-byte check (free-text variants)."""
+        request_id = generate_request_id()
+        retried_429 = False
+        while True:
+            try:
+                return await self._download_once(download_url, require_pdf)
+            except SharedLimiterTimeoutError as e:
+                logger.warning(f"[{request_id}] shared limiter refusal on download: {e}")
+                raise RateLimitedError(rate_limited_envelope(
+                    None, RATE_LIMIT_SOURCE_SHARED_LIMITER, request_id
+                )) from e
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code != 429:
+                    raise
+                envelope = await self._absorb_429(e.response, retried_429, request_id)
+                if envelope is not None:
+                    raise RateLimitedError(envelope) from e
+                retried_429 = True
+
+    async def _download_once(self, download_url: str, require_pdf: bool) -> bytes:
+        """One fetch: extraction slot, then the shared ODP limiter slot, then
+        the capped, magic-byte-checked stream. Both slots are released on
+        return or on any exception."""
+        limiter = get_shared_limiter()
+        async with _extraction_slots, (
+            limiter if limiter is not None else contextlib.nullcontext()
+        ), httpx.AsyncClient(
             timeout=self.download_timeout,
             limits=self.connection_limits,
             follow_redirects=True,
@@ -975,12 +1285,15 @@ class FPDClient:
             async with client.stream(
                 "GET",
                 download_url,
-                headers={"X-API-KEY": self.api_key, "Accept": "application/pdf"}
+                headers={
+                    "X-API-KEY": self.api_key,
+                    "Accept": "application/pdf" if require_pdf else "*/*",
+                }
             ) as pdf_response:
                 pdf_response.raise_for_status()
                 chunks: List[bytes] = []
                 total_bytes = 0
-                first_chunk = True
+                first_chunk = require_pdf
                 async for chunk in pdf_response.aiter_bytes(8192):
                     if first_chunk:
                         if not chunk.startswith(b"%PDF-"):

@@ -265,7 +265,9 @@ else:
 ## SEARCH STRATEGY
 
 ### Step 1: Build Targeted Search Query
-Base query: `ruleBag:"37 CFR 1.137"` (revival petitions)
+Base query: `decisionPetitionTypeCode:(501 OR 502 OR 562)` (revival petitions; ruleBag
+is populated only on the final decisions, so `ruleBag:"37 CFR 1.137"` would miss
+almost every revival)
 
 Search refinement based on inputs:
 - If company_name provided: Add `AND firstApplicantName:"{company_name}"`

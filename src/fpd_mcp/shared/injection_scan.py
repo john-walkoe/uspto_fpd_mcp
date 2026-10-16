@@ -96,6 +96,16 @@ _WARNING_NOTE = (
 # Text-bearing payload keys worth scanning on a hit dict.
 _DEFAULT_TEXT_KEYS = ("extracted_content", "text")
 
+# CR (review 2026-09-28, common fix C): a text_key's value can be a list
+# (e.g. Citations' `passageLocationText`) or a list of dicts, not only a
+# bare string — those were silently skipped. Bounds mirror scan_text's own
+# cost posture (cheap regex over bounded input): only strings and one level
+# of list/list-of-dict nesting are walked, and both the item count and the
+# per-field character budget are capped so a pathological payload cannot
+# turn a scan into unbounded work.
+_MAX_LIST_ITEMS = 200
+_MAX_FIELD_CHARS = 20000
+
 
 def scan_text(text: str) -> list[str]:
     """Return the kinds of injection-shaped content found in one text
@@ -112,19 +122,41 @@ def scan_text(text: str) -> list[str]:
     return kinds
 
 
+def _field_text(value: Any) -> list[str]:
+    """Flatten one field's value into scannable strings: a bare string, a
+    list of strings, or a list of dicts (one level — e.g. a citation bag
+    shaped like `[{"passageLocationText": "..."}, ...]`). Anything else
+    (int, bool, None, deeper nesting) contributes nothing; this is a
+    best-effort scan, not a schema validator."""
+    if isinstance(value, str):
+        return [value]
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    for item in value[:_MAX_LIST_ITEMS]:
+        if isinstance(item, str):
+            out.append(item)
+        elif isinstance(item, dict):
+            out.extend(v for v in item.values() if isinstance(v, str))
+    return out
+
+
 def scan_hits(
     hits: list[dict[str, Any]],
     text_keys: tuple[str, ...] = _DEFAULT_TEXT_KEYS,
     id_key: str = "petitionDecisionRecordIdentifier",
 ) -> dict[str, Any] | None:
-    """Scan the text-bearing fields of result hits. Returns None when clean;
-    otherwise an `injection_scan` payload naming each flagged hit by its
-    identifier (never by content)."""
+    """Scan the text-bearing fields of result hits. A field may be a bare
+    string or a list (of strings, or of dicts — e.g. a citation bag), all
+    walked and joined before scanning. Returns None when clean; otherwise an
+    `injection_scan` payload naming each flagged hit by its identifier
+    (never by content)."""
     flagged: list[dict[str, Any]] = []
     for i, h in enumerate(hits):
-        joined = " ".join(
-            str(h[k]) for k in text_keys if isinstance(h.get(k), str)
-        )
+        pieces: list[str] = []
+        for k in text_keys:
+            pieces.extend(_field_text(h.get(k)))
+        joined = " ".join(pieces)[:_MAX_FIELD_CHARS]
         kinds = scan_text(joined)
         if kinds:
             flagged.append({

@@ -164,8 +164,18 @@ class FieldManager:
             if "recordStartNumber" in data:
                 filtered_data["recordStartNumber"] = data["recordStartNumber"]
 
-            # Calculate context reduction based on actual character count
-            original_data_sample = data[results_key][0] if data[results_key] else {}
+            # Calculate context reduction based on actual character count.
+            # The "original" is what the caller would have received without a
+            # projection, so the current-name twin of each legacy field
+            # (payload_compat.upstream_fields asks USPTO for both since the
+            # 2026-10 rename, then the legacy alias carries the value) is not
+            # part of it: counting it claimed a 14% reduction the server had
+            # manufactured itself (found 2026-10-06).
+            from ..api.payload_compat import LEGACY_FIELD_ALIASES
+            twins = {cur for legacy, cur in LEGACY_FIELD_ALIASES.items() if legacy in fields and cur not in fields}
+            original_data_sample = (
+                {k: v for k, v in data[results_key][0].items() if k not in twins} if data[results_key] else {}
+            )
             filtered_data_sample = filtered_results[0] if filtered_results else {}
 
             # Add context info.

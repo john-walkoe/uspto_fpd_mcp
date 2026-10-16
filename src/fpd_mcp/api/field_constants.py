@@ -8,7 +8,29 @@ Based on USPTO Open Data Portal API - Final Petition Decisions endpoint.
 
 PROVENANCE OF THE FIELD NAMES BELOW
 -----------------------------------
-Verified: 2026-08-21, re-probed 2026-08-30
+Verified: 2026-08-21, re-probed 2026-08-30. SUPERSEDED IN PART BY THE
+2026-10 PAYLOAD CHANGE - read this first:
+
+2026-10 (probed live 2026-10-05; full record in
+docs/UPSTREAM-FPD-API-CHANGE-2026-10.md):
+  - The corpus is no longer ~7,500 final decisions. It is ~1.1 million
+    petition decisions back to 2001, ePetition auto-grants included, and
+    mostly GRANTED. finalPetitionDecisionIndicator (new) marks the old
+    population; on 2026-10-05 every record carrying it true was DENIED.
+  - The outcome is decidedPetitionTypeCodeDescriptionText /
+    decidedPetitionTypeCode (A GRANTED, B GRANTED-IN-PART, C DENIED,
+    D DISMISSED). decisionTypeCodeDescriptionText is gone upstream; a query
+    on it answers 404. Records keep it as an alias (api/payload_compat.py).
+  - decisionPetitionTypeCode arrives as a string; records normalise it back
+    to an integer.
+  - documentBag is native on every record (search and details). Asking the
+    details endpoint for includeDocuments=true now returns the first page of
+    the WHOLE corpus instead of the petition, so it is never sent.
+  - Default order is newest decision first (decisionDate descending).
+  - firstApplicantName is stored as written ('Apple Inc.'), and matching on
+    it is case-insensitive.
+  Statements below that conflict with this block are historical.
+
 Probe:    FPD_Search_petitions_minimal against
           https://api.uspto.gov/api/v1/petition/decisions (live, this repo's
           own client), plus the earlier live probes dated inline in
@@ -38,8 +60,9 @@ Baseline observed:
     list is not exhaustive and cannot be: USPTO publishes no enumerable
     vocabulary, so a code absent from it is simply a code no probe has
     returned yet. 562 and 529 were both missing here until 2026-09-03 while
-    live on 37 CFR 1.137 records. 551 is NOT revival - it is the single
-    largest class in the corpus and it is PTA correction:
+    live on 37 CFR 1.137 records. 551 is NOT revival - it is PTA correction,
+    a large unrelated class (it was the largest class of the pre-2026-10 final
+    decisions):
       501       TO REVIVE AN ABANDONED APPLICATION - UNAVOIDABLE DELAY
                 (37 CFR 1.137(a))
       502       REVIVE AN APPLICATION ABANDONED BY OPAP OR THE TC -
@@ -113,7 +136,16 @@ class FPDFields:
     FIRST_INVENTOR_TO_FILE_INDICATOR = "firstInventorToFileIndicator"  # AIA indicator
 
     # === DECISION FIELDS ===
-    DECISION_TYPE_CODE_DESCRIPTION_TEXT = "decisionTypeCodeDescriptionText"  # GRANTED/DENIED/DISMISSED
+    # Legacy outcome names. USPTO renamed them in 2026-10 (see below); this
+    # server keeps serving them as aliases of the new fields
+    # (api/payload_compat.py) because every consumer reads them.
+    DECISION_TYPE_CODE_DESCRIPTION_TEXT = "decisionTypeCodeDescriptionText"  # GRANTED/GRANTED-IN-PART/DENIED/DISMISSED
+    DECISION_TYPE_CODE = "decisionTypeCode"
+    # The names USPTO serves since 2026-10. The text field is analyzed
+    # (GRANTED also matches GRANTED-IN-PART); the letter code is exact.
+    DECIDED_PETITION_TYPE_CODE_DESCRIPTION_TEXT = "decidedPetitionTypeCodeDescriptionText"
+    DECIDED_PETITION_TYPE_CODE = "decidedPetitionTypeCode"  # A/B/C/D
+    FINAL_PETITION_DECISION_INDICATOR = "finalPetitionDecisionIndicator"
     PETITION_MAIL_DATE = "petitionMailDate"  # When petition filed
     DECISION_DATE = "decisionDate"  # When Director decided
     DECISION_MAIL_DATE = "decisionMailDate"  # When decision mailed
@@ -145,7 +177,12 @@ class FPDFields:
     INVENTION_TITLE = "inventionTitle"
 
     # === METADATA ===
-    LAST_INGESTION_DATE_TIME = "lastIngestionDateTime"  # Data freshness
+    LAST_INGESTION_DATE_TIME = "lastIngestionDateTime"  # Data freshness (pre-2026-10)
+    LAST_MODIFIED_DATE_TIME = "lastModifiedDateTime"  # Data freshness (2026-10)
+
+    # === SEARCH-INDEX FIELDS (2026-10; dropped from every record we serve) ===
+    ALL_SEARCHABLE_FIELDS = "allSearchableFields"
+    OCR_SEARCH_TEXT = "ocrSearchText"
 
     # === DOCUMENT FIELDS ===
     DOCUMENT_BAG = "documentBag"
@@ -182,7 +219,8 @@ class QueryFieldNames:
     DECISION_DATE = "decisionDate"
 
     # Decision search
-    DECISION_TYPE = "decisionTypeCodeDescriptionText"
+    DECISION_TYPE = "decidedPetitionTypeCodeDescriptionText"  # renamed 2026-10
+    DECISION_TYPE_CODE = "decidedPetitionTypeCode"  # exact A/B/C/D
     PETITION_TYPE = "decisionPetitionTypeCodeDescriptionText"
 
     # Status search
@@ -205,10 +243,9 @@ class PetitionRedFlags:
     The RULE_* constants are the classification axis: with
     decisionPetitionTypeCodeDescriptionText they say what relief was requested.
     The DECISION_* constants say only whether it was granted. A DENIED decision
-    is the ordinary outcome in this corpus and carries no quality signal on its
-    own - whole classes (make-special and PPH requests under 37 CFR 1.102(a))
-    are refused as a matter of routine - so never derive a red flag from an
-    outcome alone. Use these constants when analyzing petition patterns.
+    is rare across all decisions (the ordinary outcome only among the final
+    decisions) and carries no quality signal on its own, so never derive a red
+    flag from an outcome alone. Use these constants when analyzing petition patterns.
     """
     # Revival petitions (application was abandoned)
     RULE_REVIVAL = "37 CFR 1.137"
@@ -222,11 +259,12 @@ class PetitionRedFlags:
     # Special petitions
     RULE_SPECIAL_PETITION = "37 CFR 1.183"
 
-    # Decision outcomes. All three are LIVE in the public corpus, verified
-    # 2026-08-30: decisions are overwhelmingly DENIED, while GRANTED and
-    # DISMISSED are rare but real (single and low double digits respectively
-    # on that date). Do not treat a small result set for GRANTED or DISMISSED
-    # as a broken filter, and do not write a count here - the corpus grows.
+    # Decision outcomes. All four are LIVE (2026-10-05). Since the 2026-10
+    # payload change the corpus holds every petition decision, not only the
+    # final ones, and most of it is GRANTED; the final decisions
+    # (finalPetitionDecisionIndicator true) were all DENIED on that date. Do
+    # not write a count here - the corpus grows.
     DECISION_DENIED = "DENIED"
     DECISION_GRANTED = "GRANTED"
     DECISION_DISMISSED = "DISMISSED"
+    DECISION_GRANTED_IN_PART = "GRANTED-IN-PART"

@@ -1,0 +1,601 @@
+{
+ "_provenance": "Recorded live from api.uspto.gov/api/v1/petition/decisions on 2026-10-05 (probes for docs/UPSTREAM-FPD-API-CHANGE-2026-10.md). Only the two search-index fields allSearchableFields/ocrSearchText are trimmed, and only the records kept are shown; everything else is verbatim. requestIdentifier values are upstream's.",
+ "details_seed_petition": {
+  "count": 1,
+  "requestIdentifier": "8077456a-cfb7-4d66-9ecf-9a65c8458825",
+  "petitionDecisionDataBag": [
+   {
+    "firstInventorToFileIndicator": true,
+    "petitionMailDate": "2023-11-22",
+    "lastModifiedDateTime": "2026-10-05T07:59:05",
+    "prosecutionStatusCodeDescriptionText": "Abandoned",
+    "decisionPetitionTypeCode": "502",
+    "statuteBag": [
+     "35 USC 27"
+    ],
+    "applicationNumberText": "15344896",
+    "prosecutionStatusCode": 161,
+    "decidedPetitionTypeCode": "C",
+    "technologyCenter": "3600",
+    "decidedPetitionTypeCodeDescriptionText": "DENIED",
+    "applicationStatusDate": "2018-06-12",
+    "decisionMailDate": "2024-03-22",
+    "finalPetitionDecisionIndicator": true,
+    "documentBag": [
+     {
+      "documentCode": "PETDEC",
+      "documentIdentifier": "LU79EIOJBLUEX12",
+      "downloadOptionBag": [
+       {
+        "mimeTypeIdentifier": "PDF",
+        "downloadUrl": "https://api.uspto.gov/api/v1/download/applications/15344896/LU79EIOJBLUEX12.pdf",
+        "pageTotalQuantity": 10
+       },
+       {
+        "mimeTypeIdentifier": "PNG",
+        "downloadUrl": "https://api.uspto.gov/api/v1/download/applications/15344896/LU79EIOJBLUEX12/files/media_image1.png"
+       },
+       {
+        "mimeTypeIdentifier": "MS_WORD",
+        "downloadUrl": "https://api.uspto.gov/api/v1/download/applications/15344896/LU79EIOJBLUEX12/files/O.P.%20Petition%20Decision.docx"
+       },
+       {
+        "mimeTypeIdentifier": "XML",
+        "downloadUrl": "https://api.uspto.gov/api/v1/download/applications/15344896/LU79EIOJBLUEX12/xmlarchive"
+       }
+      ],
+      "officialDate": "2024-03-27T18:05:54",
+      "documentCodeDescriptionText": "Petition Decision"
+     }
+    ],
+    "ocrSearchText": "\n\n    \n    PNG\n    media_image1.png\n    340\n    340\n    media_image1.png\n    Greyscale\nUnited States Patent and Trademark Office    \n        \n            \n                                \n             [... trimmed]",
+    "petitionDecisionRecordIdentifier": "70a0101b-8dfc-546b-b5a6-aa7e786cbde3",
+    "ruleBag": [
+     "37 CFR 1.137(a)"
+    ],
+    "finalDecidingOfficeName": "OFFICE OF PETITIONS",
+    "inventorBag": [
+     "Alessandro Magliulo",
+     "William Shea Gibson"
+    ],
+    "applicationStatusDescriptionText": "Abandoned  --  Failure to Respond to an Office Action",
+    "businessEntityStatusCategory": "Regular Undiscounted",
+    "firstApplicantName": "RodRadar Ltd.",
+    "customerNumber": 150439,
+    "groupArtUnitNumber": "3671",
+    "inventionTitle": "EXCAVATOR BUCKET WITH INTEGRATED RADAR SYSTEM",
+    "decisionDate": "2024-03-22",
+    "decisionPetitionTypeCodeDescriptionText": "REVIVE AN APPLICATION ABANDONED BY OPAP OR THE TC - UNINTENTIONALLY DELAYED REPLY, NO ADDITIONAL INFORMATION REQUIRED (37 CFR 1.137(A))",
+    "petitionIssueConsideredTextBag": [
+     "Revival of an abandoned application"
+    ],
+    "courtActionIndicator": false,
+    "allSearchableFields": "15344896 Abandoned  --  Failure to Respond to an Office Action REVIVE AN APPLICATION ABANDONED BY OPAP OR THE TC - UNINTENTIONALLY DELAYED REPLY, NO ADDITIONAL INFORMATION REQUIRED (37 CFR 1.137(A)) DENIED OFFICE OF PETITIONS RodRadar Ltd. EXCAVATOR BUCKET WITH INTEGRATED RADAR SYSTEM Alessandro Magliulo William Shea Gibson Revival of an abandoned application Abandoned 37 CFR 1.137(a) 35 USC 27 \n\n    \n    PNG\n    media_image1.png\n    340\n    340\n    media_image1.png\n    Greyscale\nUnited States Patent and Trademark Office    \n        \n            \n                                \n            \n  [... recorded value trimmed from 24468 chars]"
+   }
+  ]
+ },
+ "details_with_includeDocuments_true": {
+  "count": 1113650,
+  "requestIdentifier": "add0d6a6-c069-47bd-b3cc-69db3fcc2704",
+  "petitionDecisionDataBag": [
+   {
+    "firstInventorToFileIndicator": true,
+    "petitionMailDate": "2026-10-03",
+    "lastModifiedDateTime": "2026-10-05T07:56:18",
+    "decisionPetitionTypeCode": "601",
+    "applicationNumberText": "19632342",
+    "decidedPetitionTypeCode": "A",
+    "technologyCenter": "OPAP",
+    "decidedPetitionTypeCodeDescriptionText": "GRANTED",
+    "applicationStatusDate": "2026-05-02",
+    "decisionMailDate": "2026-10-03",
+    "finalPetitionDecisionIndicator": false,
+    "documentBag": [
+     {
+      "documentCode": "PET.DEC.AUTO",
+      "documentIdentifier": "MURVCF5Y121X250",
+      "downloadOptionBag": [
+       {
+        "mimeTypeIdentifier": "PDF",
+        "downloadUrl": "https://api.uspto.gov/api/v1/download/applications/19632342/MURVCF5Y121X250.pdf",
+        "pageTotalQuantity": 1
+       },
+       {
+        "mimeTypeIdentifier": "PDF",
+        "downloadUrl": "https://api.uspto.gov/api/v1/download/applications/19632342/MURVCF5Y121X250/files/grantLetter.pdf"
+       }
+      ],
+      "officialDate": "2026-10-03T04:01:08",
+      "documentCodeDescriptionText": "ePetition Grant Letter"
+     }
+    ],
+    "ocrSearchText": "Doc code : PET.DEC.AUTO\nDescription : ePetition Grant Letter\n\nCommissioner for Patents\n\nrn UNITED STATES United States Patent and Trademark Office\nPATENT AND TRADEMARK OFFICE Alexandria, VA 22313 - 14 [... trimmed]",
+    "petitionDecisionRecordIdentifier": "9da4e19c-778f-5dd5-a2f2-284ecf4540af",
+    "finalDecidingOfficeName": "OFFICE OF PETITIONS",
+    "inventorBag": [
+     "Zvi Or-Bach",
+     "Brian Cronquist"
+    ],
+    "applicationStatusDescriptionText": "Docketed New Case - Ready for Examination",
+    "businessEntityStatusCategory": "Regular Undiscounted",
+    "firstApplicantName": "Monolithic 3D Inc.",
+    "customerNumber": 238816,
+    "groupArtUnitNumber": "OPAP",
+    "inventionTitle": "3D SEMICONDUCTOR DEVICE AND STRUCTURE WITH METAL LAYERS",
+    "decisionDate": "2026-10-03",
+    "decisionPetitionTypeCodeDescriptionText": "TO MAKE APPLICATION SPECIAL ON GROUND OF AGE (37 CFR 1.102, MPEP 708.02)",
+    "courtActionIndicator": false,
+    "allSearchableFields": "19632342 Docketed New Case - Ready for Examination TO MAKE APPLICATION SPECIAL ON GROUND OF AGE (37 CFR 1.102, MPEP 708.02) GRANTED OFFICE OF PETITIONS Monolithic 3D Inc. 3D SEMICONDUCTOR DEVICE AND STRUCTURE WITH METAL LAYERS Zvi Or-Bach Brian Cronquist Doc code : PET.DEC.AUTO\nDescription : ePetition Grant Letter\n\nCommissioner for Patents\n\nrn UNITED STATES United States Patent and Trademark Office\nPATENT AND TRADEMARK OFFICE Alexandria, VA 22313 - 1450\n\nwww.uspto.gov\n\nPETITION TO MAKE SPECIAL BASED ON AGE FOR ADVANCEMENT OF\nEXAMINATION\nUNDER 37 CFR 1.102(c)(1)\n\nAPPLICATION # ATTORNEY DOCKET # [... recorded value trimmed from 1620 chars]"
+   },
+   {
+    "firstInventorToFileIndicator": true,
+    "petitionMailDate": "2026-10-03",
+    "lastModifiedDateTime": "2026-10-05T07:56:22",
+    "decisionPetitionTypeCode": "601",
+    "applicationNumberText": "19631700",
+    "decidedPetitionTypeCode": "A",
+    "technologyCenter": "OPAP",
+    "decidedPetitionTypeCodeDescriptionText": "GRANTED",
+    "applicationStatusDate": "2026-05-29",
+    "decisionMailDate": "2026-10-03",
+    "finalPetitionDecisionIndicator": false,
+    "documentBag": [
+     {
+      "documentCode": "PET.DEC.AUTO",
+      "documentIdentifier": "MURVCDSXX174X80",
+      "downloadOptionBag": [
+       {
+        "mimeTypeIdentifier": "PDF",
+        "downloadUrl": "https://api.uspto.gov/api/v1/download/applications/19631700/MURVCDSXX174X80.pdf",
+        "pageTotalQuantity": 1
+       },
+       {
+        "mimeTypeIdentifier": "PDF",
+        "downloadUrl": "https://api.uspto.gov/api/v1/download/applications/19631700/MURVCDSXX174X80/files/grantLetter.pdf"
+       }
+      ],
+      "officialDate": "2026-10-03T04:00:15",
+      "documentCodeDescriptionText": "ePetition Grant Letter"
+     }
+    ],
+    "ocrSearchText": "Doc code : PET.DEC.AUTO\nDescription : ePetition Grant Letter\n\nCommissioner for Patents\n\nrn UNITED STATES United States Patent and Trademark Office\nPATENT AND TRADEMARK OFFICE Alexandria, VA 22313 - 14 [... trimmed]",
+    "petitionDecisionRecordIdentifier": "447d6bf0-66cd-5407-97fb-724b75e9f5d0",
+    "finalDecidingOfficeName": "OFFICE OF PETITIONS",
+    "inventorBag": [
+     "Zvi Or-Bach",
+     "Jin-Woo Han",
+     "Brian Cronquist"
+    ],
+    "applicationStatusDescriptionText": "Docketed New Case - Ready for Examination",
+    "businessEntityStatusCategory": "Regular Undiscounted",
+    "firstApplicantName": "Monolithic 3D Inc.",
+    "customerNumber": 238816,
+    "groupArtUnitNumber": "OPAP",
+    "inventionTitle": "3D SEMICONDUCTOR DEVICES AND STRUCTURES WITH FUNCTIONAL UNITS AND VERTICAL CONNECTIVITY STRUCTURES",
+    "decisionDate": "2026-10-03",
+    "decisionPetitionTypeCodeDescriptionText": "TO MAKE APPLICATION SPECIAL ON GROUND OF AGE (37 CFR 1.102, MPEP 708.02)",
+    "courtActionIndicator": false,
+    "allSearchableFields": "19631700 Docketed New Case - Ready for Examination TO MAKE APPLICATION SPECIAL ON GROUND OF AGE (37 CFR 1.102, MPEP 708.02) GRANTED OFFICE OF PETITIONS Monolithic 3D Inc. 3D SEMICONDUCTOR DEVICES AND STRUCTURES WITH FUNCTIONAL UNITS AND VERTICAL CONNECTIVITY STRUCTURES Zvi Or-Bach Jin-Woo Han Brian Cronquist Doc code : PET.DEC.AUTO\nDescription : ePetition Grant Letter\n\nCommissioner for Patents\n\nrn UNITED STATES United States Patent and Trademark Office\nPATENT AND TRADEMARK OFFICE Alexandria, VA 22313 - 1450\n\nwww.uspto.gov\n\nPETITION TO MAKE SPECIAL BASED ON AGE FOR ADVANCEMENT OF\nEXAMINATION\nUN [... recorded value trimmed from 1673 chars]"
+   }
+  ]
+ },
+ "search_application_15344896_unprojected": {
+  "count": 4,
+  "requestIdentifier": "ca24035e-7fd3-4b00-9cef-882df269f5fd",
+  "petitionDecisionDataBag": [
+   {
+    "firstInventorToFileIndicator": true,
+    "petitionMailDate": "2023-11-22",
+    "lastModifiedDateTime": "2026-10-05T07:59:05",
+    "prosecutionStatusCodeDescriptionText": "Abandoned",
+    "decisionPetitionTypeCode": "502",
+    "statuteBag": [
+     "35 USC 27"
+    ],
+    "applicationNumberText": "15344896",
+    "prosecutionStatusCode": 161,
+    "decidedPetitionTypeCode": "C",
+    "technologyCenter": "3600",
+    "decidedPetitionTypeCodeDescriptionText": "DENIED",
+    "applicationStatusDate": "2018-06-12",
+    "decisionMailDate": "2024-03-22",
+    "finalPetitionDecisionIndicator": true,
+    "documentBag": [
+     {
+      "documentCode": "PETDEC",
+      "documentIdentifier": "LU79EIOJBLUEX12",
+      "downloadOptionBag": [
+       {
+        "mimeTypeIdentifier": "PDF",
+        "downloadUrl": "https://api.uspto.gov/api/v1/download/applications/15344896/LU79EIOJBLUEX12.pdf",
+        "pageTotalQuantity": 10
+       },
+       {
+        "mimeTypeIdentifier": "PNG",
+        "downloadUrl": "https://api.uspto.gov/api/v1/download/applications/15344896/LU79EIOJBLUEX12/files/media_image1.png"
+       },
+       {
+        "mimeTypeIdentifier": "MS_WORD",
+        "downloadUrl": "https://api.uspto.gov/api/v1/download/applications/15344896/LU79EIOJBLUEX12/files/O.P.%20Petition%20Decision.docx"
+       },
+       {
+        "mimeTypeIdentifier": "XML",
+        "downloadUrl": "https://api.uspto.gov/api/v1/download/applications/15344896/LU79EIOJBLUEX12/xmlarchive"
+       }
+      ],
+      "officialDate": "2024-03-27T18:05:54",
+      "documentCodeDescriptionText": "Petition Decision"
+     }
+    ],
+    "ocrSearchText": "PNG\n    media_image1.png\n    340\n    340\n    media_image1.png\n    Greyscale\nUnited States Patent and Trademark Office    \n        \n            \n                                \n            \n        \n  [... trimmed]",
+    "petitionDecisionRecordIdentifier": "70a0101b-8dfc-546b-b5a6-aa7e786cbde3",
+    "ruleBag": [
+     "37 CFR 1.137(a)"
+    ],
+    "finalDecidingOfficeName": "OFFICE OF PETITIONS",
+    "inventorBag": [
+     "Alessandro Magliulo",
+     "William Shea Gibson"
+    ],
+    "applicationStatusDescriptionText": "Abandoned  --  Failure to Respond to an Office Action",
+    "businessEntityStatusCategory": "Regular Undiscounted",
+    "firstApplicantName": "RodRadar Ltd.",
+    "customerNumber": 150439,
+    "groupArtUnitNumber": "3671",
+    "inventionTitle": "EXCAVATOR BUCKET WITH INTEGRATED RADAR SYSTEM",
+    "decisionDate": "2024-03-22",
+    "decisionPetitionTypeCodeDescriptionText": "REVIVE AN APPLICATION ABANDONED BY OPAP OR THE TC - UNINTENTIONALLY DELAYED REPLY, NO ADDITIONAL INFORMATION REQUIRED (37 CFR 1.137(A))",
+    "petitionIssueConsideredTextBag": [
+     "Revival of an abandoned application"
+    ],
+    "courtActionIndicator": false,
+    "allSearchableFields": "15344896 Abandoned  --  Failure to Respond to an Office Action REVIVE AN APPLICATION ABANDONED BY OPAP OR THE TC - UNINTENTIONALLY DELAYED REPLY, NO ADDITIONAL INFORMATION REQUIRED (37 CFR 1.137(A)) DENIED OFFICE OF PETITIONS RodRadar Ltd. EXCAVATOR BUCKET WITH INTEGRATED RADAR SYSTEM Alessandro Magliulo William Shea Gibson Revival of an abandoned application Abandoned 37 CFR 1.137(a) 35 USC 27 \n\n    \n    PNG\n    media_image1.png\n    340\n    340\n    media_image1.png\n    Greyscale\nUnited States Patent and Trademark Office    \n        \n            \n                                \n            \n  [... recorded value trimmed from 24468 chars]"
+   },
+   {
+    "firstInventorToFileIndicator": true,
+    "petitionMailDate": "2023-09-05",
+    "lastModifiedDateTime": "2026-10-05T07:59:11",
+    "decisionPetitionTypeCode": "502",
+    "applicationNumberText": "15344896",
+    "decidedPetitionTypeCode": "D",
+    "technologyCenter": "3600",
+    "decidedPetitionTypeCodeDescriptionText": "DISMISSED",
+    "applicationStatusDate": "2018-06-12",
+    "decisionMailDate": "2023-10-03",
+    "finalPetitionDecisionIndicator": false,
+    "documentBag": [
+     {
+      "documentCode": "PETDEC",
+      "documentIdentifier": "LNC2BAEJGREENX2",
+      "downloadOptionBag": [
+       {
+        "mimeTypeIdentifier": "PDF",
+        "downloadUrl": "https://api.uspto.gov/api/v1/download/applications/15344896/LNC2BAEJGREENX2.pdf",
+        "pageTotalQuantity": 6
+       },
+       {
+        "mimeTypeIdentifier": "XML",
+        "downloadUrl": "https://api.uspto.gov/api/v1/download/applications/15344896/LNC2BAEJGREENX2/xmlarchive"
+       },
+       {
+        "mimeTypeIdentifier": "MS_WORD",
+        "downloadUrl": "https://api.uspto.gov/api/v1/download/applications/15344896/LNC2BAEJGREENX2/files/O.P.%20Petition%20Decision.docx"
+       },
+       {
+        "mimeTypeIdentifier": "PNG",
+        "downloadUrl": "https://api.uspto.gov/api/v1/download/applications/15344896/LNC2BAEJGREENX2/files/media_image1.png"
+       }
+      ],
+      "officialDate": "2023-10-06T14:08:20",
+      "documentCodeDescriptionText": "Petition Decision"
+     }
+    ],
+    "ocrSearchText": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<uspat:OutgoingDocument\r\n    xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\r\n    xmlns:uspat=\"urn:us:gov:doc:uspto:patent\"\r\n    xmlns=\"urn:us:gov:doc:usp [... trimmed]",
+    "petitionDecisionRecordIdentifier": "b14e2018-7ecc-5f9c-b4e3-e3bcc3163216",
+    "finalDecidingOfficeName": "OFFICE OF PETITIONS",
+    "inventorBag": [
+     "Alessandro Magliulo",
+     "William Shea Gibson"
+    ],
+    "applicationStatusDescriptionText": "Abandoned  --  Failure to Respond to an Office Action",
+    "businessEntityStatusCategory": "Regular Undiscounted",
+    "firstApplicantName": "RodRadar Ltd.",
+    "customerNumber": 150439,
+    "groupArtUnitNumber": "3671",
+    "inventionTitle": "EXCAVATOR BUCKET WITH INTEGRATED RADAR SYSTEM",
+    "decisionDate": "2023-10-03",
+    "decisionPetitionTypeCodeDescriptionText": "REVIVE AN APPLICATION ABANDONED BY OPAP OR THE TC - UNINTENTIONALLY DELAYED REPLY, NO ADDITIONAL INFORMATION REQUIRED (37 CFR 1.137(A))",
+    "courtActionIndicator": false,
+    "allSearchableFields": "15344896 Abandoned  --  Failure to Respond to an Office Action REVIVE AN APPLICATION ABANDONED BY OPAP OR THE TC - UNINTENTIONALLY DELAYED REPLY, NO ADDITIONAL INFORMATION REQUIRED (37 CFR 1.137(A)) DISMISSED OFFICE OF PETITIONS RodRadar Ltd. EXCAVATOR BUCKET WITH INTEGRATED RADAR SYSTEM Alessandro Magliulo William Shea Gibson <?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<uspat:OutgoingDocument\r\n    xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\r\n    xmlns:uspat=\"urn:us:gov:doc:uspto:patent\"\r\n    xmlns=\"urn:us:gov:doc:uspto:patent\"\r\n    xmlns:com=\"http://www.wipo.int/standards/XMLSchema/ST96 [... recorded value trimmed from 31976 chars]"
+   },
+   {
+    "firstInventorToFileIndicator": true,
+    "petitionMailDate": "2023-08-08",
+    "lastModifiedDateTime": "2026-10-05T07:57:21",
+    "decisionPetitionTypeCode": "502",
+    "applicationNumberText": "15344896",
+    "decidedPetitionTypeCode": "D",
+    "technologyCenter": "3600",
+    "decidedPetitionTypeCodeDescriptionText": "DISMISSED",
+    "applicationStatusDate": "2018-06-12",
+    "decisionMailDate": "2023-08-25",
+    "finalPetitionDecisionIndicator": false,
+    "documentBag": [
+     {
+      "documentCode": "PETDEC",
+      "documentIdentifier": "LLUT9CJYXBLUEX1",
+      "downloadOptionBag": [
+       {
+        "mimeTypeIdentifier": "PDF",
+        "downloadUrl": "https://api.uspto.gov/api/v1/download/applications/15344896/LLUT9CJYXBLUEX1.pdf",
+        "pageTotalQuantity": 3
+       },
+       {
+        "mimeTypeIdentifier": "PNG",
+        "downloadUrl": "https://api.uspto.gov/api/v1/download/applications/15344896/LLUT9CJYXBLUEX1/files/media_image1.png"
+       },
+       {
+        "mimeTypeIdentifier": "MS_WORD",
+        "downloadUrl": "https://api.uspto.gov/api/v1/download/applications/15344896/LLUT9CJYXBLUEX1/files/O.P.%20Petition%20Decision.docx"
+       },
+       {
+        "mimeTypeIdentifier": "XML",
+        "downloadUrl": "https://api.uspto.gov/api/v1/download/applications/15344896/LLUT9CJYXBLUEX1/xmlarchive"
+       }
+      ],
+      "officialDate": "2023-08-30T07:43:07",
+      "documentCodeDescriptionText": "Petition Decision"
+     }
+    ],
+    "ocrSearchText": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<uspat:OutgoingDocument\r\n    xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\r\n    xmlns:uspat=\"urn:us:gov:doc:uspto:patent\"\r\n    xmlns=\"urn:us:gov:doc:usp [... trimmed]",
+    "petitionDecisionRecordIdentifier": "73a47591-d630-5c73-bdcb-d9175229f419",
+    "finalDecidingOfficeName": "OFFICE OF PETITIONS",
+    "inventorBag": [
+     "Alessandro Magliulo",
+     "William Shea Gibson"
+    ],
+    "applicationStatusDescriptionText": "Abandoned  --  Failure to Respond to an Office Action",
+    "businessEntityStatusCategory": "Regular Undiscounted",
+    "firstApplicantName": "RodRadar Ltd.",
+    "customerNumber": 150439,
+    "groupArtUnitNumber": "3671",
+    "inventionTitle": "EXCAVATOR BUCKET WITH INTEGRATED RADAR SYSTEM",
+    "decisionDate": "2023-08-25",
+    "decisionPetitionTypeCodeDescriptionText": "REVIVE AN APPLICATION ABANDONED BY OPAP OR THE TC - UNINTENTIONALLY DELAYED REPLY, NO ADDITIONAL INFORMATION REQUIRED (37 CFR 1.137(A))",
+    "courtActionIndicator": false,
+    "allSearchableFields": "15344896 Abandoned  --  Failure to Respond to an Office Action REVIVE AN APPLICATION ABANDONED BY OPAP OR THE TC - UNINTENTIONALLY DELAYED REPLY, NO ADDITIONAL INFORMATION REQUIRED (37 CFR 1.137(A)) DISMISSED OFFICE OF PETITIONS RodRadar Ltd. EXCAVATOR BUCKET WITH INTEGRATED RADAR SYSTEM Alessandro Magliulo William Shea Gibson <?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<uspat:OutgoingDocument\r\n    xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\r\n    xmlns:uspat=\"urn:us:gov:doc:uspto:patent\"\r\n    xmlns=\"urn:us:gov:doc:uspto:patent\"\r\n    xmlns:com=\"http://www.wipo.int/standards/XMLSchema/ST96 [... recorded value trimmed from 14967 chars]"
+   },
+   {
+    "firstInventorToFileIndicator": true,
+    "petitionMailDate": "2022-10-24",
+    "lastModifiedDateTime": "2026-10-05T07:57:08",
+    "decisionPetitionTypeCode": "502",
+    "applicationNumberText": "15344896",
+    "decidedPetitionTypeCode": "D",
+    "technologyCenter": "3600",
+    "decidedPetitionTypeCodeDescriptionText": "DISMISSED",
+    "applicationStatusDate": "2018-06-12",
+    "decisionMailDate": "2023-02-07",
+    "finalPetitionDecisionIndicator": false,
+    "documentBag": [
+     {
+      "documentCode": "PETDEC",
+      "documentIdentifier": "LDVUKLJCGREENX3",
+      "downloadOptionBag": [
+       {
+        "mimeTypeIdentifier": "PDF",
+        "downloadUrl": "https://api.uspto.gov/api/v1/download/applications/15344896/LDVUKLJCGREENX3.pdf",
+        "pageTotalQuantity": 5
+       },
+       {
+        "mimeTypeIdentifier": "XML",
+        "downloadUrl": "https://api.uspto.gov/api/v1/download/applications/15344896/LDVUKLJCGREENX3/xmlarchive"
+       },
+       {
+        "mimeTypeIdentifier": "MS_WORD",
+        "downloadUrl": "https://api.uspto.gov/api/v1/download/applications/15344896/LDVUKLJCGREENX3/files/O.P.%20Petition%20Decision.docx"
+       },
+       {
+        "mimeTypeIdentifier": "PNG",
+        "downloadUrl": "https://api.uspto.gov/api/v1/download/applications/15344896/LDVUKLJCGREENX3/files/media_image1.png"
+       }
+      ],
+      "officialDate": "2023-02-10T05:00:00",
+      "documentCodeDescriptionText": "Petition Decision"
+     }
+    ],
+    "ocrSearchText": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<uspat:OutgoingDocument\r\n    xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\r\n    xmlns:uspat=\"urn:us:gov:doc:uspto:patent\"\r\n    xmlns=\"urn:us:gov:doc:usp [... trimmed]",
+    "petitionDecisionRecordIdentifier": "d8b93245-35a2-5d3a-990c-69bf0e3555e3",
+    "finalDecidingOfficeName": "OFFICE OF PETITIONS",
+    "inventorBag": [
+     "Alessandro Magliulo",
+     "William Shea Gibson"
+    ],
+    "applicationStatusDescriptionText": "Abandoned  --  Failure to Respond to an Office Action",
+    "businessEntityStatusCategory": "Regular Undiscounted",
+    "firstApplicantName": "RodRadar Ltd.",
+    "customerNumber": 150439,
+    "groupArtUnitNumber": "3671",
+    "inventionTitle": "EXCAVATOR BUCKET WITH INTEGRATED RADAR SYSTEM",
+    "decisionDate": "2023-02-07",
+    "decisionPetitionTypeCodeDescriptionText": "REVIVE AN APPLICATION ABANDONED BY OPAP OR THE TC - UNINTENTIONALLY DELAYED REPLY, NO ADDITIONAL INFORMATION REQUIRED (37 CFR 1.137(A))",
+    "courtActionIndicator": false,
+    "allSearchableFields": "15344896 Abandoned  --  Failure to Respond to an Office Action REVIVE AN APPLICATION ABANDONED BY OPAP OR THE TC - UNINTENTIONALLY DELAYED REPLY, NO ADDITIONAL INFORMATION REQUIRED (37 CFR 1.137(A)) DISMISSED OFFICE OF PETITIONS RodRadar Ltd. EXCAVATOR BUCKET WITH INTEGRATED RADAR SYSTEM Alessandro Magliulo William Shea Gibson <?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<uspat:OutgoingDocument\r\n    xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\r\n    xmlns:uspat=\"urn:us:gov:doc:uspto:patent\"\r\n    xmlns=\"urn:us:gov:doc:uspto:patent\"\r\n    xmlns:com=\"http://www.wipo.int/standards/XMLSchema/ST96 [... recorded value trimmed from 25156 chars]"
+   }
+  ]
+ },
+ "search_type_code_551": {
+  "count": 13442,
+  "requestIdentifier": "15797964-d6bf-45a5-b6f2-8d400b713ff4",
+  "petitionDecisionDataBag": [
+   {
+    "decisionPetitionTypeCodeDescriptionText": "CORRECTION OF PATENT TERM ADJUSTMENT VALUE AFTER ISUE",
+    "petitionDecisionRecordIdentifier": "75e76f08-9d06-5552-89d8-e8e78df830d5",
+    "decisionPetitionTypeCode": "551",
+    "decidedPetitionTypeCodeDescriptionText": "DISMISSED",
+    "finalPetitionDecisionIndicator": false
+   },
+   {
+    "decisionPetitionTypeCodeDescriptionText": "CORRECTION OF PATENT TERM ADJUSTMENT VALUE AFTER ISUE",
+    "petitionDecisionRecordIdentifier": "8d66032b-1d66-5275-bbde-a1d893df8f25",
+    "decisionPetitionTypeCode": "551",
+    "decidedPetitionTypeCodeDescriptionText": "GRANTED",
+    "finalPetitionDecisionIndicator": false
+   }
+  ]
+ },
+ "search_applicant_apple_as_typed": {
+  "count": 2798,
+  "requestIdentifier": "7d6701e1-a7f1-4ac4-bf9f-c4a24398cf47",
+  "petitionDecisionDataBag": [
+   {
+    "petitionMailDate": "2026-09-10",
+    "petitionDecisionRecordIdentifier": "4def6cd4-3c7e-54f5-bc9a-b6bce2462c55",
+    "decidedPetitionTypeCodeDescriptionText": "GRANTED",
+    "firstApplicantName": "Apple Inc.",
+    "groupArtUnitNumber": "1724",
+    "applicationNumberText": "18818206",
+    "finalPetitionDecisionIndicator": false,
+    "decisionDate": "2026-09-29"
+   },
+   {
+    "petitionMailDate": "2026-09-29",
+    "petitionDecisionRecordIdentifier": "649b2fb5-1281-57a7-aef0-55ec8d740585",
+    "decidedPetitionTypeCodeDescriptionText": "GRANTED",
+    "firstApplicantName": "Apple Inc.",
+    "groupArtUnitNumber": "2872",
+    "applicationNumberText": "18824615",
+    "finalPetitionDecisionIndicator": false,
+    "decisionDate": "2026-09-29"
+   },
+   {
+    "petitionMailDate": "2026-09-28",
+    "petitionDecisionRecordIdentifier": "5d890f20-1718-55fc-b687-a848efe83090",
+    "decidedPetitionTypeCodeDescriptionText": "GRANTED",
+    "firstApplicantName": "Apple Inc.",
+    "groupArtUnitNumber": "2836",
+    "applicationNumberText": "17814091",
+    "finalPetitionDecisionIndicator": false,
+    "decisionDate": "2026-09-28"
+   }
+  ]
+ },
+ "search_art_unit_3643_default_order": {
+  "count": 3290,
+  "requestIdentifier": "f1127266-9ec9-4577-8af0-4d9507427cd8",
+  "petitionDecisionDataBag": [
+   {
+    "petitionMailDate": "2026-09-17",
+    "petitionDecisionRecordIdentifier": "253bc4c3-9c33-52b9-9154-b7f5a55e9a7f",
+    "decidedPetitionTypeCodeDescriptionText": "GRANTED",
+    "groupArtUnitNumber": "3643",
+    "applicationNumberText": "18379156",
+    "finalPetitionDecisionIndicator": false,
+    "decisionDate": "2026-09-17"
+   },
+   {
+    "petitionMailDate": "2026-04-14",
+    "petitionDecisionRecordIdentifier": "c0c3773c-ace1-5aed-8e7e-7cd7b1401610",
+    "decidedPetitionTypeCodeDescriptionText": "GRANTED",
+    "firstApplicantName": "Dynamic Solutions Worldwide, LLC",
+    "groupArtUnitNumber": "3643",
+    "applicationNumberText": "16269264",
+    "finalPetitionDecisionIndicator": false,
+    "decisionDate": "2026-09-15"
+   }
+  ]
+ },
+ "search_art_unit_3643_sort_petitionMailDate_asc": {
+  "count": 3290,
+  "requestIdentifier": "f3ff6534-1322-430a-914e-492bb1d41af8",
+  "petitionDecisionDataBag": [
+   {
+    "petitionMailDate": "2001-10-29",
+    "petitionDecisionRecordIdentifier": "fcad04d9-ad85-5b20-bcac-66146ca0b65e",
+    "decidedPetitionTypeCodeDescriptionText": "GRANTED",
+    "groupArtUnitNumber": "3643",
+    "applicationNumberText": "09674399",
+    "finalPetitionDecisionIndicator": false,
+    "decisionDate": "2001-12-18"
+   },
+   {
+    "petitionMailDate": "2002-02-19",
+    "petitionDecisionRecordIdentifier": "143b0b95-d12c-5f78-9f10-b1dcdbbc0f65",
+    "decidedPetitionTypeCodeDescriptionText": "DISMISSED",
+    "groupArtUnitNumber": "3643",
+    "applicationNumberText": "10006017",
+    "decisionDate": "2003-02-20",
+    "finalPetitionDecisionIndicator": false
+   }
+  ]
+ },
+ "search_decided_denied": {
+  "count": 7499,
+  "requestIdentifier": "0b608aee-8ad4-4033-b658-634bea9674e9",
+  "petitionDecisionDataBag": [
+   {
+    "petitionMailDate": "2026-03-19",
+    "petitionDecisionRecordIdentifier": "41eae51e-5d21-512e-92db-4eba0a610d73",
+    "decidedPetitionTypeCodeDescriptionText": "DENIED",
+    "finalPetitionDecisionIndicator": true
+   }
+  ]
+ },
+ "details_unknown_petition_404": {
+  "code": "404",
+  "message": "Not Found",
+  "detailedMessage": "No matching records found, refine your search criteria and try again",
+  "requestIdentifier": "920ee8c7-108c-4407-a772-eef005e18be6"
+ },
+ "facets_decision_vocabulary": {
+  "count": 1113650,
+  "facets": {
+   "decidedPetitionTypeCode": [
+    {
+     "value": "A",
+     "count": 880459
+    },
+    {
+     "value": "D",
+     "count": 223828
+    },
+    {
+     "value": "C",
+     "count": 7499
+    },
+    {
+     "value": "B",
+     "count": 1864
+    }
+   ],
+   "decidedPetitionTypeCodeDescriptionText": [
+    {
+     "value": "GRANTED",
+     "count": 880459
+    },
+    {
+     "value": "DISMISSED",
+     "count": 223828
+    },
+    {
+     "value": "DENIED",
+     "count": 7499
+    },
+    {
+     "value": "GRANTED-IN-PART",
+     "count": 1864
+    }
+   ],
+   "finalPetitionDecisionIndicator": [
+    {
+     "value": "0",
+     "count": 1106151
+    },
+    {
+     "value": "1",
+     "count": 7499
+    }
+   ]
+  }
+ }
+}

@@ -142,17 +142,18 @@ async def test_red_flags_section_lists_the_live_revival_type_codes():
     assert "observed, not exhaustive" in result.lower()
 
 
-async def test_coverage_section_states_a_completeness_floor_not_a_cutoff():
-    """Decisions from 2011, 2014 and 2015 are live in art unit 2128 alone, so
-    2022 marks where coverage becomes systematic, not where data begins."""
+async def test_coverage_section_has_no_2022_floor():
+    """Since USPTO's 2026-10 change the corpus holds every disposition decided
+    from the early 2000s on (yearly facet counts, 2026-10-07: thousands a year
+    from 2003). The old "2022 completeness floor" described the pre-change
+    final-decisions dataset; it is now named only to be ruled out, and the
+    filing-date floor is what makes an old application out of scope."""
     result = await fpd_get_guidance(section="coverage")
 
-    assert "completeness floor, not a cutoff" in result.lower()
-    assert "2011" in result
-    assert "inconclusive" in result.lower()
-    # The superseded instruction was "report that the decision predates the
-    # dataset"; it is now explicitly ruled out rather than taught.
-    assert "do not report that the decision predates" in result.lower()
+    assert "there is no 2022 floor in the current corpus" in result.lower()
+    assert "filed in 2001 or later" in result
+    assert "pre-2022 coverage" not in result.lower()
+    assert "final_only=true" in result.lower()
 
 
 async def test_coverage_section_documents_firstapplicantname_sparsity():

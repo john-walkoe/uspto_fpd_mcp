@@ -225,7 +225,7 @@ class TestMinimalQueryBuilding:
         expected_parts = [
             f'{QueryFieldNames.APPLICANT_NAME}:"Apple Inc."',
             f'{QueryFieldNames.PATENT_NUMBER}:11788453',
-            f'{QueryFieldNames.DECISION_TYPE}:DENIED',
+            f'{QueryFieldNames.DECISION_TYPE_CODE}:C',
         ]
         for part in expected_parts:
             assert part in query, f"Missing query part: {part}"
@@ -260,7 +260,7 @@ class TestMinimalQueryBuilding:
         )
         assert "(machine learning)" in query
         assert f'{QueryFieldNames.APPLICANT_NAME}:"TechCorp"' in query
-        assert f"{QueryFieldNames.DECISION_TYPE}:DENIED" in query
+        assert f"{QueryFieldNames.DECISION_TYPE_CODE}:C" in query
         assert params["base_query"] == "machine learning"
         assert params["applicant_name"] == "TechCorp"
 
@@ -276,6 +276,11 @@ class TestMinimalQueryBuilding:
         )
         assert f"{QueryFieldNames.APPLICATION_NUMBER}:17896175" in query
         assert params["application_number"] == "17896175"
+
+    def test_printed_serial_form_with_comma_is_accepted(self):
+        # "19/353,487" used to lose only its slash and 400 on the comma.
+        assert validate_application_number("19/353,487") == "19353487"
+        assert validate_application_number("19353487") == "19353487"
 
     def test_multiple_parameter_combination(self):
         query, params = _build_convenience_query(
@@ -335,7 +340,7 @@ class TestBalancedQueryBuilding:
 
         expected_parts = [
             f'{QueryFieldNames.APPLICANT_NAME}:"TechCorp"',
-            f"{QueryFieldNames.DECISION_TYPE}:DENIED",
+            f"{QueryFieldNames.DECISION_TYPE_CODE}:C",
             f"{QueryFieldNames.ART_UNIT}:2128",
             f"{FPDFields.DECISION_PETITION_TYPE_CODE}:551",
             f'{QueryFieldNames.BUSINESS_ENTITY}:"Small"',
@@ -435,6 +440,25 @@ class TestApplyBalancedParamsHelper:
         )
         assert query_parts == [f"{FPDFields.DECISION_PETITION_TYPE_CODE}:551"]
         assert params_used == {"petition_type_code": "551"}
+
+    def test_a_comma_list_of_codes_becomes_one_or_clause(self):
+        # The docstring's revival example; sent verbatim before 2026-10-07 it
+        # matched nothing (and failed the 10-character length check).
+        query_parts, params_used = [], {}
+        _apply_balanced_params(
+            query_parts, params_used,
+            petition_type_code="501, 502,562", art_unit=None, technology_center=None,
+            prosecution_status=None, entity_status=None,
+        )
+        assert query_parts == [f"{FPDFields.DECISION_PETITION_TYPE_CODE}:(501 OR 502 OR 562)"]
+        assert params_used == {"petition_type_code": "501,502,562"}
+
+    def test_a_non_code_is_refused(self):
+        with pytest.raises(ValidationError):
+            _apply_balanced_params(
+                [], {}, petition_type_code="502 OR *", art_unit=None,
+                technology_center=None, prosecution_status=None, entity_status=None,
+            )
 
 
 class TestRejectBalancedOnlyParamsHelper:

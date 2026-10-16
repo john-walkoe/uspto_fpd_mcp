@@ -247,6 +247,82 @@ async def test_create_proxy_app_accepts_an_injected_client():
     assert signature.parameters["client"].default is None
 
 
+# --------------------------------------------------------------- ARCH-01
+# Regression of F-D1 (review 2026-09-28): mcp.run() is a SYNCHRONOUS
+# wrapper around anyio.run(), which creates its OWN new event loop. Called
+# inside asyncio.to_thread (a separate OS thread), that new loop is not the
+# one run_hybrid_server itself runs on. F-D1's share_client=True default
+# assumed the always-on proxy task and the tool calls shared one loop; on
+# the stdio hybrid path they do not.
+
+
+async def test_reproduces_the_two_loops_mcp_run_actually_creates():
+    """Reproduces the mechanism directly: capture the identity of the loop
+    asyncio.to_thread(lambda: mcp.run(...)) would actually run tool calls
+    on (a brand-new loop from anyio.run(), started in a worker thread) and
+    confirm it differs from the outer loop run_hybrid_server (and the
+    always-on proxy task created on it) runs on — the exact condition that
+    makes sharing one FPDClient's asyncio locks across them unsafe."""
+
+    outer_loop = asyncio.get_running_loop()
+    captured: dict = {}
+
+    def fake_mcp_run(transport):
+        # Faithful to the real shape: FastMCP.run() calls anyio.run(...),
+        # which (asyncio backend, no loop running in this thread) creates
+        # a brand-new event loop here in the worker thread.
+        async def _capture_inner_loop():
+            captured["inner_loop"] = asyncio.get_running_loop()
+
+        asyncio.run(_capture_inner_loop())
+
+    await asyncio.to_thread(fake_mcp_run, "stdio")
+
+    assert captured["inner_loop"] is not outer_loop
+
+
+async def test_always_on_proxy_task_runs_on_the_outer_loop_not_mcp_runs_loop(
+    monkeypatch,
+):
+    """The always-on proxy task is created via asyncio.create_task from
+    inside run_hybrid_server's own coroutine — the OUTER loop — while
+    mcp.run()'s tool calls execute on the inner loop captured above. Runs
+    run_hybrid_server for real (mcp.run and uvicorn stubbed) and asserts
+    both the loop mismatch and that the fix no longer shares a client
+    across it."""
+    calls: dict = {}
+    outer_loop = asyncio.get_running_loop()
+
+    class _FakeMcp:
+        def run(self, transport):
+            async def _noop():
+                captured_loop = asyncio.get_running_loop()
+                calls["mcp_run_loop"] = captured_loop
+
+            asyncio.run(_noop())
+
+    async def _fake_run_proxy_server(port, share_client=True):
+        calls["proxy_loop"] = asyncio.get_running_loop()
+        calls["share_client"] = share_client
+
+    monkeypatch.setattr(server_bootstrap, "get_server", lambda: _FakeMcp())
+    monkeypatch.setattr(server_bootstrap, "_port_in_use", lambda port: False)
+    monkeypatch.setattr(server_bootstrap, "_run_proxy_server", _fake_run_proxy_server)
+    monkeypatch.setattr(server_bootstrap, "_on_proxy_task_done", lambda task: None)
+
+    await server_bootstrap.run_hybrid_server(enable_always_on=True, proxy_port=8081)
+
+    # The proxy task really does run on the outer loop...
+    assert calls["proxy_loop"] is outer_loop
+    # ...while mcp.run()'s tool calls run on a DIFFERENT loop entirely —
+    # reproducing the exact mismatch that made F-D1's share_client=True
+    # default unsafe here.
+    assert calls["mcp_run_loop"] is not outer_loop
+    # The fix: the always-on path no longer hands the cross-loop proxy task
+    # the process's shared FPDClient.
+    assert calls["share_client"] is False
+
+
 # ------------------------------------------------------------ CORS assembly
 
 

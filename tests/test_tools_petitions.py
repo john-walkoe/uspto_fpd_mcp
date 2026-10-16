@@ -105,7 +105,8 @@ async def test_search_petitions_by_art_unit_returns_expected_keys(mock_runtime):
     assert "llm_guidance" in result
 
     mock_runtime.api_client.search_by_art_unit.assert_awaited_once_with(
-        art_unit="2128", date_range="2020-01-01:2024-12-31", limit=50, offset=0
+        art_unit="2128", date_range="2020-01-01:2024-12-31", limit=50, offset=0,
+        final_only=False,
     )
 
 
@@ -132,6 +133,7 @@ async def test_search_petitions_by_application_returns_expected_keys(mock_runtim
         application_number="17896175", include_documents=False, limit=100,
         offset=0,
         fields=mock_runtime.field_manager.get_fields("petitions_balanced"),
+        final_only=False,
     )
 
 
@@ -163,6 +165,7 @@ async def test_search_petitions_by_application_pages(mock_runtime):
         application_number="17896175", include_documents=False, limit=100,
         offset=0,
         fields=mock_runtime.field_manager.get_fields("petitions_balanced"),
+        final_only=False,
     )
 
 
@@ -279,7 +282,8 @@ async def test_by_art_unit_accepts_the_offset_it_advertises(mock_runtime):
     assert result["paging"]["has_more"] is True
     assert result["paging"]["next_offset"] == 3
     mock_runtime.api_client.search_by_art_unit.assert_awaited_once_with(
-        art_unit="3643", date_range=None, limit=1, offset=2
+        art_unit="3643", date_range=None, limit=1, offset=2,
+        final_only=False,
     )
 
 
@@ -347,6 +351,51 @@ async def test_get_petition_details_rejects_bad_uuid(mock_runtime):
 
     assert result["status_code"] == 400
     mock_runtime.api_client.get_petition_by_id.assert_not_awaited()
+
+
+# --------------------------- CR-59/MCP-9: no raw download URL ever leaks out
+
+
+async def test_get_petition_details_strips_the_raw_download_url(mock_runtime):
+    """downloadOptionBag.downloadUrl is a raw api.uspto.gov URL that 401s
+    without the server's own API key — it must never reach the model, even
+    on a small response the size guard never touches."""
+    mock_runtime.api_client.get_petition_by_id.return_value = {
+        "petitionDecisionDataBag": [
+            {
+                "petitionDecisionRecordIdentifier": _PETITION_ID,
+                "documentBag": [
+                    {
+                        "documentIdentifier": "DOC1",
+                        "documentCode": "PET",
+                        "downloadOptionBag": [
+                            {
+                                "mimeTypeIdentifier": "PDF",
+                                "downloadUrl": "https://api.uspto.gov/api/v1/petition/DOC1/download",
+                                "pageTotalQuantity": 3,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+
+    result = await fpd_get_petition_details(petition_id=_PETITION_ID)
+
+    doc = result["petitionDecisionDataBag"][0]["documentBag"][0]
+    assert "downloadOptionBag" not in doc
+    assert "downloadUrl" not in str(result)  # no raw URL survives anywhere
+    # The follow-up path (documentIdentifier) is untouched.
+    assert doc["documentIdentifier"] == "DOC1"
+
+
+async def test_get_petition_details_docstring_never_tells_the_model_to_relay_documentbag_urls():
+    doc = fpd_get_petition_details.__doc__
+
+    assert "provide all document download links to user" not in doc.lower()
+    assert "stripped from this response" in doc
+    assert "FPD_get_document_download" in doc
 
 
 async def test_by_application_honors_the_documented_customization_surface(
@@ -480,19 +529,27 @@ async def test_details_guidance_does_not_frame_denial_as_a_quality_flag(mock_run
 def test_balanced_docstring_lists_the_live_revival_type_codes():
     doc = fpd_search_petitions_balanced.__doc__
 
-    assert "| 562 |" in doc
-    assert "| 529 |" in doc
-    assert "ADDITIONAL INFORMATION REQUIRED (37 CFR 1.137(A))" in doc
-    # 529's description, recovered live 2026-09-03; USPTO's own mixed case.
-    assert "To Withdraw A Holding of Abandonment in Pre-Exam Status" in doc
+    # Since 2026-10-07 the table is grouped by class and points at
+    # FPD_list_petition_types for USPTO's full names; 562 and 529 stay named.
+    assert "562 (additional information required)" in doc
+    assert "529 (pre-exam)" in doc
+    assert "FPD_list_petition_types(search='revival')" in doc
+    # The examiner-dispute class, code by code (a claude.ai run read "609-612"
+    # as a range and pulled in 614, a holding of abandonment).
+    assert "611 (prematureness of final rejection)" in doc
+    assert "Not 515" in doc and "not 613/614" in doc
     assert "not recorded here" not in doc
 
 
 def test_balanced_docstring_says_the_type_table_is_not_exhaustive():
     doc = fpd_search_petitions_balanced.__doc__
 
-    assert "OBSERVED, NOT EXHAUSTIVE" in doc
-    assert "Filter on `ruleBag`, not on a type code" in doc
+    assert "THIS TABLE IS NOT EXHAUSTIVE" in doc
+    # Reversed 2026-10-07: ruleBag is populated only on the final decisions,
+    # so ruleBag:"37 CFR 1.137" reached 55 records against about 108,000
+    # revival decisions under types 501/502/562 (facet counts that day).
+    assert "Select a class by type code, not by `ruleBag`" in doc
+    assert "Filter on `ruleBag`, not on a type code" not in doc
 
 
 def test_field_constants_provenance_lists_the_live_revival_type_codes():
@@ -512,7 +569,7 @@ def test_field_constants_provenance_lists_the_live_revival_type_codes():
 # cutoff. It is a completeness floor: art unit 2128's three petitions were
 # decided in 2011, 2014 and 2015, and records as early as 2003 are present.
 
-def test_every_search_tool_describes_2022_as_a_completeness_floor():
+def test_every_search_tool_states_coverage_without_a_2022_floor():
     for fn in (
         fpd_search_petitions_minimal,
         fpd_search_petitions_balanced,
@@ -520,9 +577,9 @@ def test_every_search_tool_describes_2022_as_a_completeness_floor():
         fpd_search_petitions_by_application,
     ):
         doc = fn.__doc__
-        assert "COMPLETENESS FLOOR, not a cutoff" in doc, fn.__name__
-        assert "the decisions data itself starts with" not in doc, fn.__name__
-        assert "2003" in doc, fn.__name__
+        assert "There is no 2022 floor any more" in doc, fn.__name__
+        assert "COMPLETENESS FLOOR" not in doc, fn.__name__
+        assert "filed in 2001 or later" in doc, fn.__name__
 
 
 async def test_by_application_zero_result_guidance_is_a_floor_not_a_cutoff(mock_runtime):
@@ -534,11 +591,12 @@ async def test_by_application_zero_result_guidance_is_a_floor_not_a_cutoff(mock_
 
     meaning = result["llm_guidance"]["interpretation"]["no_petitions"]["meaning"]
     caveat = result["llm_guidance"]["interpretation"]["no_petitions"]["caveat"]
-    assert "COMPLETENESS FLOOR, not a cutoff" in meaning
-    # The old text told the reader an older decision "is simply absent here",
-    # which is the cutoff reading the floor replaces.
-    assert "simply absent here" not in caveat
-    assert "partial" in caveat
+    assert "every disposition" in meaning
+    assert "2022" not in meaning + caveat
+    # The identifier check comes first: a patent number passed as an
+    # application serial is the wrong-not-empty zero.
+    assert "patent number" in caveat
+    assert "before 2001" in caveat
 
 
 # ---------------------------------------------------------------------------
@@ -566,15 +624,173 @@ def test_details_docstring_treats_an_absent_field_as_null_or_empty():
     assert "same case as null or empty" in doc
 
 
-def test_details_docstring_names_the_wrapper_fallback_and_its_observation_date():
+def test_details_docstring_names_the_native_bag_and_the_wrapper_fallback():
     doc = fpd_get_petition_details.__doc__
 
-    assert "APPLICATION'S FILE WRAPPER, not a\npetition bag" in doc
-    assert "2026-09-03" in doc
+    assert "the petition's own papers" in doc
+    assert '"petition_record"' in doc
     assert "application_file_wrapper_fallback" in doc
+    assert "whole prosecution history" in doc
 
 
-def test_by_application_include_documents_names_the_wrapper_bag():
+def test_by_application_include_documents_names_the_native_and_wrapper_bags():
     doc = fpd_search_petitions_by_application.__doc__
 
-    assert "APPLICATION'S\n  FILE WRAPPER, not a petition bag" in doc
+    assert '"petition_record"' in doc
+    assert "APPLICATION'S FILE\n  WRAPPER" in doc
+
+
+# ---------------------------------------------------------------------------
+# final_only: the two populations (USPTO 2026-10 corpus change)
+# ---------------------------------------------------------------------------
+
+_FINAL_CLAUSE = "finalPetitionDecisionIndicator:true"
+
+
+async def test_minimal_final_only_sends_the_indicator_clause(mock_runtime):
+    mock_runtime.api_client.search_petitions.return_value = _search_result()
+
+    result = await fpd_search_petitions_minimal(
+        applicant_name="TechCorp Inc.", final_only=True
+    )
+
+    _, kwargs = mock_runtime.api_client.search_petitions.call_args
+    assert kwargs["query"] == f'firstApplicantName:"TechCorp Inc." AND {_FINAL_CLAUSE}'
+    assert result["query_info"]["final_only"] is True
+    assert result["query_info"]["convenience_parameters_used"]["final_only"] is True
+
+
+async def test_minimal_final_only_alone_is_a_valid_search(mock_runtime):
+    mock_runtime.api_client.search_petitions.return_value = _search_result()
+
+    await fpd_search_petitions_minimal(final_only=True)
+
+    _, kwargs = mock_runtime.api_client.search_petitions.call_args
+    assert kwargs["query"] == _FINAL_CLAUSE
+
+
+async def test_minimal_default_sends_no_indicator_clause(mock_runtime):
+    mock_runtime.api_client.search_petitions.return_value = _search_result()
+
+    result = await fpd_search_petitions_minimal(applicant_name="TechCorp Inc.")
+
+    _, kwargs = mock_runtime.api_client.search_petitions.call_args
+    assert "finalPetitionDecisionIndicator" not in kwargs["query"]
+    assert result["query_info"]["final_only"] is False
+    assert "final_only" not in result["query_info"]["convenience_parameters_used"]
+
+
+async def test_balanced_final_only_sends_the_indicator_clause(mock_runtime):
+    mock_runtime.api_client.search_petitions.return_value = _search_result()
+
+    result = await fpd_search_petitions_balanced(
+        decision_type="DENIED", art_unit="2128", final_only=True
+    )
+
+    _, kwargs = mock_runtime.api_client.search_petitions.call_args
+    assert kwargs["query"].endswith(f" AND {_FINAL_CLAUSE}")
+    assert "decidedPetitionTypeCode:C" in kwargs["query"]
+    assert result["query_info"]["final_only"] is True
+
+
+async def test_balanced_default_sends_no_indicator_clause(mock_runtime):
+    mock_runtime.api_client.search_petitions.return_value = _search_result()
+
+    result = await fpd_search_petitions_balanced(art_unit="2128")
+
+    _, kwargs = mock_runtime.api_client.search_petitions.call_args
+    assert "finalPetitionDecisionIndicator" not in kwargs["query"]
+    assert result["query_info"]["final_only"] is False
+
+
+async def test_by_art_unit_passes_final_only_to_the_client(mock_runtime):
+    mock_runtime.api_client.search_by_art_unit.return_value = _search_result()
+
+    await fpd_search_petitions_by_art_unit(art_unit="2128", final_only=True)
+
+    _, kwargs = mock_runtime.api_client.search_by_art_unit.call_args
+    assert kwargs["final_only"] is True
+
+
+async def test_by_application_passes_final_only_to_the_client(mock_runtime):
+    mock_runtime.api_client.search_by_application.return_value = _search_result()
+
+    await fpd_search_petitions_by_application(
+        application_number="17896175", final_only=True
+    )
+
+    _, kwargs = mock_runtime.api_client.search_by_application.call_args
+    assert kwargs["final_only"] is True
+
+
+async def _client_query(monkeypatch, method, **kwargs):
+    monkeypatch.setenv("USPTO_API_KEY", "a" * 30)
+    client = FPDClient(api_key="a" * 30)
+    seen = {}
+
+    async def _fake_search(**kw):
+        seen.update(kw)
+        return {"petitionDecisionDataBag": [], "count": 0}
+
+    client.search_petitions = _fake_search
+    await getattr(client, method)(**kwargs)
+    return seen["query"]
+
+
+async def test_client_art_unit_final_only_composes_the_clause(monkeypatch):
+    on = await _client_query(
+        monkeypatch, "search_by_art_unit", art_unit="2128", final_only=True
+    )
+    off = await _client_query(monkeypatch, "search_by_art_unit", art_unit="2128")
+
+    assert on == f"groupArtUnitNumber:2128 AND {_FINAL_CLAUSE}"
+    assert "finalPetitionDecisionIndicator" not in off
+
+
+async def test_client_application_final_only_composes_the_clause(monkeypatch):
+    on = await _client_query(
+        monkeypatch, "search_by_application",
+        application_number="17896175", final_only=True,
+    )
+    off = await _client_query(
+        monkeypatch, "search_by_application", application_number="17896175"
+    )
+
+    assert on == f"applicationNumberText:17896175 AND {_FINAL_CLAUSE}"
+    assert "finalPetitionDecisionIndicator" not in off
+
+
+def test_every_search_tool_documents_final_only_and_the_two_populations():
+    for tool in (
+        fpd_search_petitions_minimal,
+        fpd_search_petitions_balanced,
+        fpd_search_petitions_by_art_unit,
+        fpd_search_petitions_by_application,
+    ):
+        doc = tool.__doc__
+        assert "**Two populations:**" in doc, tool.__name__
+        assert "finalPetitionDecisionIndicator:true" in doc, tool.__name__
+        assert "final_only" in doc, tool.__name__
+        # No dated census in a served string: it cannot re-verify itself.
+        assert "7,499" not in doc and "7,497" not in doc, tool.__name__
+
+
+def test_minimal_docstring_states_the_dense_query_limit_clamp():
+    doc = fpd_search_petitions_minimal.__doc__
+
+    assert "limit above about 50 on dense queries is clamped by the response bound" in doc
+    assert "`_bounds`" in doc
+    assert "offset" in doc
+
+
+def test_guidance_states_two_populations_and_the_clamp():
+    from fpd_mcp.config.tool_reflections import get_guidance_section
+
+    overview = get_guidance_section("overview")
+
+    assert "## Two populations" in overview
+    assert "final_only" in overview
+    assert "7,499" not in overview and "7,497" not in overview
+    assert "limit above about 50 on a dense query is clamped by the response bound" in overview
+    assert "`_bounds` says so" in overview
+    assert "—" not in overview.split("## Two populations")[1].split("## Available Tools Summary")[0]

@@ -69,6 +69,52 @@ def test_scan_hits_payload_contains_no_matched_text():
     assert out["flagged"][0]["petitionDecisionRecordIdentifier"] == "X"
 
 
+# --------------------------------------- CR-C (review 2026-09-28): list values
+
+
+def test_scan_hits_walks_a_list_of_strings():
+    out = scan_hits(
+        [{
+            "petitionDecisionRecordIdentifier": "X",
+            "text": ["normal petition text", CANNED],
+        }]
+    )
+    assert out is not None
+    assert "instruction_override" in out["flagged"][0]["kinds"]
+
+
+def test_scan_hits_walks_a_list_of_dicts():
+    """The shape Citations' `passageLocationText` carries: a bag of dicts,
+    not a bag of bare strings."""
+    out = scan_hits(
+        [{
+            "petitionDecisionRecordIdentifier": "X",
+            "text": [
+                {"passageLocationText": "col. 3, line 12"},
+                {"passageLocationText": CANNED},
+            ],
+        }]
+    )
+    assert out is not None
+    assert "instruction_override" in out["flagged"][0]["kinds"]
+
+
+def test_scan_hits_clean_list_stays_clean():
+    assert scan_hits(
+        [{"petitionDecisionRecordIdentifier": "X", "text": ["a", "b", "c"]}]
+    ) is None
+
+
+def test_scan_hits_ignores_non_string_non_list_values():
+    # Numbers, None, nested lists: no crash, no false flag.
+    assert scan_hits(
+        [{"petitionDecisionRecordIdentifier": "X", "text": 42}]
+    ) is None
+    assert scan_hits(
+        [{"petitionDecisionRecordIdentifier": "X", "text": None}]
+    ) is None
+
+
 # ---------------------------------------------------------------------------
 # Wiring tests: FPD_get_document_content_with_ocr envelope
 # ---------------------------------------------------------------------------

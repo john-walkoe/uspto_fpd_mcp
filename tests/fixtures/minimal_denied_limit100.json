@@ -1,0 +1,871 @@
+{
+ "count": 7481,
+ "petitionDecisionDataBag": [
+  {
+   "petitionDecisionRecordIdentifier": "7c0f6889-6a1b-590a-adf4-cb62ea58470c",
+   "applicationNumberText": "09756788",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2009-05-13",
+   "decisionDate": "2010-09-09",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "ae65651d-c489-5913-ac99-2825876784d8",
+   "applicationNumberText": "09761661",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2005-04-20",
+   "decisionDate": "2005-09-22",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "bdac962a-bc29-5a2c-b7d4-f48d288ea1e8",
+   "applicationNumberText": "09762692",
+   "patentNumber": "7670373",
+   "firstApplicantName": "Thirumani Sabanathan",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2003-01-15",
+   "decisionDate": "2003-06-05",
+   "finalDecidingOfficeName": "INTERNATIONAL DIVISION"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "26247f07-2627-5649-88aa-58bd10c75433",
+   "applicationNumberText": "09764365",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2004-07-28",
+   "decisionDate": "2004-08-30",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "e96728cc-aa91-5991-9172-83ec6a7286ba",
+   "applicationNumberText": "09775239",
+   "patentNumber": "6530905",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2012-03-23",
+   "decisionDate": "2012-10-03",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "e92df957-9dcf-5001-9a2c-6af20fc7532e",
+   "applicationNumberText": "09801536",
+   "patentNumber": "6793224",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2011-07-28",
+   "decisionDate": "2011-12-19",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "a627c487-2ce9-5075-b42b-0cd816cc548d",
+   "applicationNumberText": "09803819",
+   "patentNumber": "7135862",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2008-02-27",
+   "decisionDate": "2009-06-03",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "7048ef92-d63b-5412-9714-188377d40dcc",
+   "applicationNumberText": "09809029",
+   "patentNumber": "8609436",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2014-01-16",
+   "decisionDate": "2015-03-04",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "5d511d57-6dc1-506a-8459-f959c505334e",
+   "applicationNumberText": "09825533",
+   "patentNumber": "8065180",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2011-08-12",
+   "decisionDate": "2011-09-19",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "9d5858f2-cedc-5447-a4ad-164571af6e0c",
+   "applicationNumberText": "09836281",
+   "patentNumber": "7143013",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2001-09-18",
+   "decisionDate": "2001-10-15",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "52037435-c852-53ca-9572-6733ede41096",
+   "applicationNumberText": "09858844",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2012-07-23",
+   "decisionDate": "2012-12-31",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "3b1089bd-d068-5814-a95e-5c341497816e",
+   "applicationNumberText": "09865822",
+   "patentNumber": "6603052",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2010-11-19",
+   "decisionDate": "2011-09-19",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "56ea0913-78fd-53fd-be42-37bc4313f30a",
+   "applicationNumberText": "09901359",
+   "patentNumber": "6434763",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2011-09-07",
+   "decisionDate": "2012-04-20",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "b8e5b9b3-302a-5d23-a2ea-81d4e6bc682b",
+   "applicationNumberText": "09907951",
+   "patentNumber": "6994854",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2006-07-28",
+   "decisionDate": "2007-01-25",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "abeb4911-fbe6-5b95-b305-8e2e62451af6",
+   "applicationNumberText": "09925673",
+   "patentNumber": "7335765",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2008-10-08",
+   "decisionDate": "2010-08-30",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "a1cdf918-0cf3-5c09-ab24-7f469dc4f285",
+   "applicationNumberText": "09933918",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2002-07-03",
+   "decisionDate": "2004-06-28",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "6eafcfc6-14e8-508b-aaaa-0ee226869a24",
+   "applicationNumberText": "09933918",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2004-11-29",
+   "decisionDate": "2005-03-21",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "c2e156d8-b2c3-54b8-93e0-945cdbd8b36d",
+   "applicationNumberText": "09937192",
+   "patentNumber": "7238682",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2007-06-12",
+   "decisionDate": "2009-03-31",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "6329a683-de7e-596c-83ef-efce9fa5b5f3",
+   "applicationNumberText": "09938465",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2006-05-01",
+   "decisionDate": "2006-09-25",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "01bc9d41-76b9-571b-8a2f-c9ee1bb89a81",
+   "applicationNumberText": "09942961",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2003-05-30",
+   "decisionDate": "2003-09-30",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "db1aabbc-ee93-5254-9a94-03aeb9a165e2",
+   "applicationNumberText": "09954964",
+   "patentNumber": "7885864",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2006-08-15",
+   "decisionDate": "2007-01-19",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "37e525d6-487d-52e8-90b7-93b90d8a0574",
+   "applicationNumberText": "09958201",
+   "patentNumber": "6899332",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2004-05-17",
+   "decisionDate": "2005-01-04",
+   "finalDecidingOfficeName": "INTERNATIONAL DIVISION"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "9165d6d3-1f1d-5307-9123-81103578c6f6",
+   "applicationNumberText": "10010942",
+   "patentNumber": "7189819",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2007-05-14",
+   "decisionDate": "2007-09-25",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "2041fff8-53f6-59f3-8959-b0c923dfe869",
+   "applicationNumberText": "10015249",
+   "patentNumber": "6813361",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2013-04-01",
+   "decisionDate": "2013-05-20",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "53ce3019-722b-5a23-ad4f-8d2ed058af8c",
+   "applicationNumberText": "10017280",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2009-05-21",
+   "decisionDate": "2009-08-13",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "b7c0bca9-ad70-5821-b97d-ae73833c3365",
+   "applicationNumberText": "10018302",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2008-04-28",
+   "decisionDate": "2009-02-04",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "6c278712-5d18-569d-b22b-34d8f03b3558",
+   "applicationNumberText": "10031405",
+   "patentNumber": "7574372",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2010-08-18",
+   "decisionDate": "2010-09-30",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "30bd9825-a9c2-5475-8261-561b8d136f2a",
+   "applicationNumberText": "10033472",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2006-02-06",
+   "decisionDate": "2007-02-23",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "9a0e8c34-331b-5537-91d7-7edf0f7ea38e",
+   "applicationNumberText": "10034177",
+   "patentNumber": "6756572",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2011-02-07",
+   "decisionDate": "2011-04-18",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "630717c5-113c-5588-b196-5d6efdd10b21",
+   "applicationNumberText": "10046180",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2003-07-25",
+   "decisionDate": "2005-01-14",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "5774182e-4406-5acd-bf0f-d8118f68cde7",
+   "applicationNumberText": "10046180",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2003-07-25",
+   "decisionDate": "2005-01-14",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "83cb3e38-0edd-56df-beff-70c91ff5e1c8",
+   "applicationNumberText": "10054328",
+   "patentNumber": "7989376",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2009-02-17",
+   "decisionDate": "2009-04-01",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "4f4ebd30-ade9-507f-a915-a5423799b515",
+   "applicationNumberText": "10054328",
+   "patentNumber": "7989376",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2009-06-30",
+   "decisionDate": "2009-10-28",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "fdb417b7-54f4-5083-9755-a58e3838b7ea",
+   "applicationNumberText": "10069732",
+   "patentNumber": "7688685",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2011-03-24",
+   "decisionDate": "2011-05-18",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "053ebdf7-0e51-588f-845b-f08c83de0861",
+   "applicationNumberText": "10071093",
+   "patentNumber": "6648330",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2011-01-31",
+   "decisionDate": "2011-04-25",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "ed0a83d3-0227-5eaf-83b4-bbf2569f85b6",
+   "applicationNumberText": "10079819",
+   "patentNumber": "6784644",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2012-08-15",
+   "decisionDate": "2013-04-08",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "1053f060-95b3-5ecc-b66c-5b2fe38ebb84",
+   "applicationNumberText": "10087449",
+   "patentNumber": "8504179",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2013-10-04",
+   "decisionDate": "2014-12-31",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "55be0089-6df1-56bb-ac68-3c242be9cca8",
+   "applicationNumberText": "10107828",
+   "patentNumber": "7045615",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2010-09-17",
+   "decisionDate": "2011-03-24",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "3c5889c6-9fe3-5f17-a53f-034c2a133105",
+   "applicationNumberText": "10113841",
+   "firstApplicantName": "Mary K. Tselepis",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2010-10-13",
+   "decisionDate": "2011-07-13",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "0b8c3628-ace4-5125-9e6b-7d3d2681f796",
+   "applicationNumberText": "10117403",
+   "patentNumber": "6641138",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2008-05-15",
+   "decisionDate": "2009-04-29",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "9d9e7934-aab8-539b-881b-6d54e7c426fc",
+   "applicationNumberText": "10139620",
+   "patentNumber": "6869939",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2010-05-11",
+   "decisionDate": "2014-07-14",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "713f5af4-db88-5e5a-9396-075fd92a2895",
+   "applicationNumberText": "10146527",
+   "patentNumber": "9927796",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2018-12-03",
+   "decisionDate": "2020-10-06",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "61dbb314-a8ca-576a-a813-3ca758b53ad7",
+   "applicationNumberText": "10147218",
+   "firstApplicantName": "Deborah Grazioso",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2010-12-20",
+   "decisionDate": "2012-01-25",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "68ba7b48-4463-5155-bd13-be609ba8beea",
+   "applicationNumberText": "10148262",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2005-06-17",
+   "decisionDate": "2006-12-20",
+   "finalDecidingOfficeName": "INTERNATIONAL DIVISION"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "7421aa2c-2139-5767-80d4-9b1dc66aadd0",
+   "applicationNumberText": "10151571",
+   "patentNumber": "6834773",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2012-11-05",
+   "decisionDate": "2013-03-04",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "66c18dde-f57c-57c4-9195-8fbb8fcb30d5",
+   "applicationNumberText": "10162796",
+   "patentNumber": "7547674",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2010-11-29",
+   "decisionDate": "2011-02-07",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "ed7e4f62-6d34-5b45-acb3-529e77694ae3",
+   "applicationNumberText": "10162796",
+   "patentNumber": "7547674",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2010-11-29",
+   "decisionDate": "2011-02-07",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "d2150884-8c5e-5c1a-8252-17bdbc764940",
+   "applicationNumberText": "10174973",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2007-02-06",
+   "decisionDate": "2007-05-07",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "79bcab64-1b4d-581a-a060-d2c6bc3a7a84",
+   "applicationNumberText": "10176850",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2006-01-20",
+   "decisionDate": "2006-12-14",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "02e78a9c-08c4-56c1-b664-53f7f98efb9f",
+   "applicationNumberText": "10178515",
+   "patentNumber": "8257176",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2011-04-01",
+   "decisionDate": "2012-01-17",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "28e320f0-df89-5c9f-908f-a5d2616b01a5",
+   "applicationNumberText": "10198871",
+   "patentNumber": "7599736",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2023-06-12",
+   "decisionDate": "2024-03-22",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "54f4ad41-c2ac-5402-aef9-41ab25a57894",
+   "applicationNumberText": "10198871",
+   "patentNumber": "7599736",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2023-06-12",
+   "decisionDate": "2024-03-22",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "8cbf6113-7d70-5422-ab03-a4ee62f8a638",
+   "applicationNumberText": "10228672",
+   "patentNumber": "8375673",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2013-03-04",
+   "decisionDate": "2015-07-30",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "b347ed1e-cadd-51d0-96f1-e91351463e71",
+   "applicationNumberText": "10228734",
+   "patentNumber": "7452630",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2010-11-09",
+   "decisionDate": "2011-03-28",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "cde04f93-013a-59a5-ac91-e5c1ab7e868e",
+   "applicationNumberText": "10229889",
+   "patentNumber": "6754297",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2011-11-21",
+   "decisionDate": "2012-03-06",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "34848f0f-bfe9-5f17-a1ab-62357b305221",
+   "applicationNumberText": "10237866",
+   "patentNumber": "6972322",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2010-03-05",
+   "decisionDate": "2010-09-27",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "53f187dc-c442-5da0-8a53-8a28c8cf1785",
+   "applicationNumberText": "10241454",
+   "patentNumber": "7251218",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2012-08-09",
+   "decisionDate": "2012-10-03",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "311a9acb-2ad7-58b6-863b-5ce117583dde",
+   "applicationNumberText": "10251480",
+   "patentNumber": "8361037",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2013-03-29",
+   "decisionDate": "2014-09-23",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "d43e475c-877b-50a3-9d04-66474217e878",
+   "applicationNumberText": "10270163",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2008-10-31",
+   "decisionDate": "2010-08-26",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "0b71b685-adb9-539d-8257-127dc9e58247",
+   "applicationNumberText": "10290800",
+   "patentNumber": "6796905",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2003-08-04",
+   "decisionDate": "2003-10-17",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "882e7f38-0cbf-529d-b31f-af2d90f79d73",
+   "applicationNumberText": "10292688",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2011-06-06",
+   "decisionDate": "2012-01-30",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "244f17e0-e9bc-572b-88e3-23ba3c9a0c7a",
+   "applicationNumberText": "10293506",
+   "patentNumber": "7108095",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2024-07-09",
+   "decisionDate": "2025-03-24",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "0d5f5afa-d456-52b4-81e2-d4e51d7c801b",
+   "applicationNumberText": "10298115",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2003-05-23",
+   "decisionDate": "2003-08-04",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "4f38676d-9622-5bfa-a723-0680d170fa70",
+   "applicationNumberText": "10306808",
+   "patentNumber": "8478784",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2013-04-25",
+   "decisionDate": "2013-05-15",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "aa193b4e-00dd-513a-9ad3-1982826b9f05",
+   "applicationNumberText": "10314843",
+   "patentNumber": "7292760",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2006-05-18",
+   "decisionDate": "2006-10-03",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "d3dd2858-9e3c-522e-9f58-69a2e03b1086",
+   "applicationNumberText": "10324630",
+   "patentNumber": "8025325",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2010-04-22",
+   "decisionDate": "2011-01-12",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "eafa727a-354d-534f-b6aa-a4b366afbb28",
+   "applicationNumberText": "10347018",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2011-09-30",
+   "decisionDate": "2012-03-26",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "73386bf4-af9b-560e-b89d-c37b8e0dd4e1",
+   "applicationNumberText": "10355543",
+   "patentNumber": "7557210",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2011-03-18",
+   "decisionDate": "2011-04-11",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "abc1ba56-7e48-5ff4-8b81-5e21ed95e909",
+   "applicationNumberText": "10357900",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2012-03-05",
+   "decisionDate": "2012-06-08",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "aa1e396c-7a14-5808-a5dd-b61f7e6dfb7b",
+   "applicationNumberText": "10358813",
+   "patentNumber": "7386231",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2006-07-25",
+   "decisionDate": "2007-11-29",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "346f76c3-f2ca-57ae-ae85-2e5402f6f915",
+   "applicationNumberText": "10362092",
+   "patentNumber": "9864997",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2018-02-07",
+   "decisionDate": "2019-02-28",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "093267aa-a60d-5653-a8f4-5ed02b7e97f1",
+   "applicationNumberText": "10365102",
+   "patentNumber": "8894782",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2023-07-20",
+   "decisionDate": "2025-03-17",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "08bcb37e-128a-5c1a-b367-31d12cf1e68d",
+   "applicationNumberText": "10365102",
+   "patentNumber": "8894782",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2023-07-20",
+   "decisionDate": "2025-03-17",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "89e1ad9f-ae12-5392-ac0a-c46700cb7e8b",
+   "applicationNumberText": "10388389",
+   "patentNumber": "7179892",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2007-04-20",
+   "decisionDate": "2007-09-13",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "db571d2a-0f41-5f20-8ab4-9cc16f96a2b6",
+   "applicationNumberText": "10424135",
+   "patentNumber": "7061177",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2006-04-17",
+   "decisionDate": "2006-10-17",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "de993955-16c9-5d28-a3f3-d9abf2c7a76b",
+   "applicationNumberText": "10435597",
+   "patentNumber": "8906413",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2015-08-17",
+   "decisionDate": "2016-02-04",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "dd0f0afc-c7a7-5844-bf7d-fec813299503",
+   "applicationNumberText": "10440308",
+   "patentNumber": "8141399",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2007-07-23",
+   "decisionDate": "2008-10-30",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "6778108e-0e2a-5ece-a461-b820c48f5d88",
+   "applicationNumberText": "10440308",
+   "patentNumber": "8141399",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2008-12-30",
+   "decisionDate": "2009-02-19",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "c2cbee7a-1315-512a-af70-1318cb9f9869",
+   "applicationNumberText": "10443430",
+   "patentNumber": "8973593",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2012-10-25",
+   "decisionDate": "2013-01-29",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "aaef3e8e-a234-597f-be45-29c1164768f2",
+   "applicationNumberText": "10446572",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2011-05-04",
+   "decisionDate": "2012-02-24",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "a74c659a-6e94-53da-ab8a-88171fe96118",
+   "applicationNumberText": "10446572",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2012-04-28",
+   "decisionDate": "2012-09-07",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "31951537-41f3-5b90-ad9a-e9002f35eba0",
+   "applicationNumberText": "10458198",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2006-01-10",
+   "decisionDate": "2006-02-09",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "1f0e0b01-37d1-52b1-bea1-5abce8b2a009",
+   "applicationNumberText": "10473224",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2008-05-27",
+   "decisionDate": "2010-04-12",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "4de5af73-8a43-587d-8d46-27c429acdf6b",
+   "applicationNumberText": "10479949",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2007-02-16",
+   "decisionDate": "2007-04-24",
+   "finalDecidingOfficeName": "INTERNATIONAL DIVISION"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "cd0ffca2-2bcc-5cdf-b160-2b829b158d2c",
+   "applicationNumberText": "10479949",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2007-05-01",
+   "decisionDate": "2007-06-27",
+   "finalDecidingOfficeName": "INTERNATIONAL DIVISION"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "c71c8c7f-547c-5f43-9791-d7142c44a74c",
+   "applicationNumberText": "10480346",
+   "patentNumber": "7914933",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2009-10-19",
+   "decisionDate": "2010-10-06",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "2bf8304d-1e67-525a-8c8b-07e7007f2e8d",
+   "applicationNumberText": "10481262",
+   "patentNumber": "7365205",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2010-06-14",
+   "decisionDate": "2010-09-27",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "764066d7-ca3a-5436-a430-02bf192cf085",
+   "applicationNumberText": "10484655",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2007-07-02",
+   "decisionDate": "2008-03-10",
+   "finalDecidingOfficeName": "INTERNATIONAL DIVISION"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "89de6d0d-fd34-57e7-91e9-5ddff6db30f7",
+   "applicationNumberText": "10484655",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2007-07-02",
+   "decisionDate": "2008-03-10",
+   "finalDecidingOfficeName": "INTERNATIONAL DIVISION"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "a2187f90-46b1-5d5a-a871-f86089e1aee8",
+   "applicationNumberText": "10484655",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2008-05-12",
+   "decisionDate": "2008-12-02",
+   "finalDecidingOfficeName": "INTERNATIONAL DIVISION"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "ef0dd160-5ca0-58a2-afe0-5099e7ea0944",
+   "applicationNumberText": "10484655",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2008-05-12",
+   "decisionDate": "2008-12-02",
+   "finalDecidingOfficeName": "INTERNATIONAL DIVISION"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "480fb540-ba25-570b-a36b-b8e6f5da84de",
+   "applicationNumberText": "10487979",
+   "patentNumber": "8826587",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2014-10-30",
+   "decisionDate": "2015-08-18",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "a5300e82-c270-57c8-b70a-4ed84a3b03df",
+   "applicationNumberText": "10490285",
+   "patentNumber": "8034915",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2012-01-17",
+   "decisionDate": "2012-06-11",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "0f671519-a5af-5725-bb9a-e7d3e31fcb92",
+   "applicationNumberText": "10490285",
+   "patentNumber": "8034915",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2012-08-13",
+   "decisionDate": "2012-09-14",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "63ddb60d-2707-53cd-935b-c473f368b8da",
+   "applicationNumberText": "10497852",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2010-03-25",
+   "decisionDate": "2010-09-09",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "bcb5be1b-d6f9-53a5-826a-ea9e65d8ba55",
+   "applicationNumberText": "10508588",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2012-07-20",
+   "decisionDate": "2012-11-13",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "14df57e7-6714-53d4-a368-08466fbf6e91",
+   "applicationNumberText": "10512911",
+   "patentNumber": "9005641",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2013-03-25",
+   "decisionDate": "2013-04-09",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "23db3085-fdb9-52cc-9d40-a2294baeeccf",
+   "applicationNumberText": "10531159",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2007-02-06",
+   "decisionDate": "2007-10-05",
+   "finalDecidingOfficeName": "INTERNATIONAL DIVISION"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "07d3da72-7232-5fdf-be80-28f1e17d04bb",
+   "applicationNumberText": "10531720",
+   "patentNumber": "7470791",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2010-10-18",
+   "decisionDate": "2018-08-13",
+   "finalDecidingOfficeName": "OFFICE OF PETITIONS"
+  },
+  {
+   "petitionDecisionRecordIdentifier": "e8d3a61d-6663-51d8-9c97-451e210f1bfc",
+   "applicationNumberText": "10534467",
+   "decisionTypeCodeDescriptionText": "DENIED",
+   "petitionMailDate": "2006-03-23",
+   "decisionDate": "2006-05-01",
+   "finalDecidingOfficeName": "INTERNATIONAL DIVISION"
+  }
+ ]
+}

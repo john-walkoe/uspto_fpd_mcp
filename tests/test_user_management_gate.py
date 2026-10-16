@@ -40,13 +40,13 @@ def _probe(extra_env: dict) -> tuple[str, int]:
 def test_manage_users_absent_by_default():
     present, count = _probe({})
     assert present == "ABSENT"
-    assert count == 8
+    assert count == 11
 
 
 def test_manage_users_registered_when_enabled():
     present, count = _probe({"FPD_ENABLE_USER_MANAGEMENT": "true"})
     assert present == "PRESENT"
-    assert count == 9
+    assert count == 12
 
 
 def test_manage_users_refuses_http_without_oauth():

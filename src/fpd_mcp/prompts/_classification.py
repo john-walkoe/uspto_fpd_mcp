@@ -5,10 +5,9 @@ text, so the rule is stated once and cannot drift between ten templates.
 
 Why it exists: the templates were written around an assumption that a DENIED
 petition is evidence of a defect (weak arguments, procedural errors, poor
-prosecution). It is not. The public corpus is overwhelmingly DENIED, and whole
-petition classes are refused as a matter of routine - a make-special or PPH
-request under 37 CFR 1.102(a) is refused as a scheduling decision, and those
-refusals dominate the denials. The classification axis is
+prosecution). It is not. Final decisions are overwhelmingly DENIED, but across
+all decisions DENIED is rare and most make-special and PPH petitions are
+GRANTED. The classification axis is
 decisionPetitionTypeCodeDescriptionText plus ruleBag, which say what relief was
 requested; the decision value says only whether it was granted. The same
 correction was applied to the tools' llm_guidance and to
@@ -26,10 +25,10 @@ Classify each petition on `decisionPetitionTypeCodeDescriptionText` and
 `ruleBag` - what relief was REQUESTED - before reading
 `decisionTypeCodeDescriptionText`, which says only whether it was granted.
 
-- DENIED is the ordinary outcome in this corpus. Whole classes are refused
-  routinely: a petition to make special or a PPH request under 37 CFR 1.102(a)
-  is refused as a scheduling decision, not as a finding about the application,
-  the portfolio or the practitioner.
+- DENIED is the ordinary outcome only among final decisions; across all decisions
+  it is rare and most make-special and PPH petitions are GRANTED. A denial is not
+  a finding about the application, the portfolio or the practitioner; compare it
+  within its own petition type.
   A denial carries NO quality signal on its own.
 - Compare an outcome only against other petitions of the SAME type. A denial
   rate computed across mixed petition types measures the mix, not quality, so

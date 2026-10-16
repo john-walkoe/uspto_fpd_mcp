@@ -9,7 +9,7 @@ authors = [
 ]
 
 dependencies = [
-    "fastmcp[apps]>=4.0.0,<5.0.0",
+    "fastmcp[apps]>=4.0.3,<5.0.0",
     "aiosqlite>=0.20",
     # Floors raised with the FastMCP 4 bump: fastmcp 4 requires starlette >=1.0.1
     # and fastapi >=0.133, so the old 0.x floors described a combination this
@@ -27,12 +27,14 @@ dependencies = [
     "requests>=2.31.0",
     "detect-secrets>=1.5.0",
     "pypdf>=6.14.2",
+    "defusedxml>=0.7.1",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3.4",
     "pytest-asyncio>=0.25.2",
+    "pytest-cov>=6.0.0",
 ]
 
 [build-system]
@@ -45,12 +47,29 @@ dev = [
     "pre-commit>=4.5.0",
     "pytest>=8.3.4",
     "pytest-asyncio>=0.25.2",
+    "pytest-cov>=6.0.0",
     "ruff>=0.15.21",
 ]
 
 [project.scripts]
 fpd-mcp = "fpd_mcp.main:run_server"
 fpd-proxy = "fpd_mcp.proxy.server:run_proxy_cli"
+
+# Coverage is measured, not gated (2026-10-12 audit T-1): CI reports it on
+# every run and nothing fails on the number. Locally:
+# `uv run pytest --cov --cov-report=term-missing`.
+[tool.coverage.run]
+source = ["src/fpd_mcp"]
+omit = [
+    "*/prompts/*",   # prompt templates are content, and registration-gated off
+    "*/ui/*",        # embedded HTML/JS, not Python logic
+]
+
+[tool.coverage.report]
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
